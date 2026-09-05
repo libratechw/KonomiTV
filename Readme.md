@@ -2,7 +2,7 @@
 > [!WARNING]
 > **このbranchは、KonomiTVを日常利用しながら複数componentの変更を統合検証するdogfood版です。branch全体をupstreamへ取り込むことは想定していません。**
 >
-> **配備状態：EVO-X2の専用環境へ試験配備中。** 録画OriginalとライブOriginalの再生開始、異常終了後の自動復帰、全mutable dataを含む復旧snapshotを確認しています。ライブを720pへ切り替えるとVCEEncCが終了し、Originalにも戻れないため、日常利用向けにはまだ案内していません。EVO-X2再起動後の自動起動も未確認です。
+> **配備状態：EVO-X2の専用環境へ試験配備中。** 録画Original、ライブのOriginal→720p→Original往復、異常終了後の自動復帰を確認しています。VCEEncCは実ライブで終了するため、配備設定ではFFmpegを使います。720pの実機試験では1280×720で再生が進み、`docker stats`のCPU使用率は56.20〜59.70%でした。EVO-X2再起動後の自動起動と、複数ストリームを同時に変換する場合の余力は未確認です。
 
 このbranchはKonomiTV `ea1962f84c22265c1d31081dfe41cc3b53e9a555`を基点に、次の変更を固定しています。
 
@@ -21,7 +21,7 @@
 
 DPlayer候補はbuild・testとGalaxyでの画質切替A/Bを通過しています。Starlette変更は単体test、backend直結試験、2素材のWindows実視聴比較を完了しています。mpeg2toh264の変更は診断情報の追加であり、iOSの再生停止を修正するものではありません。
 
-既知の未解決問題は、iPhone / iPadでOriginalへ切り替えた際の`InvalidStateError`、GalaxyのライブOriginalでWorker描画が大きくコマ落ちする現象、EVO-X2上の試験環境でライブを720pへ切り替えた際のVCEEncC終了です。日常利用で得た観察は再現条件の探索に使い、固定条件の正式測定とは分けて扱います。
+既知の未解決問題は、iPhone / iPadでOriginalへ切り替えた際の`InvalidStateError`と、GalaxyのライブOriginalでWorker描画が大きくコマ落ちする現象です。EVO-X2ではVCEEncCのOpenCL経路が実ライブを処理できないため、dogfood環境をFFmpegへ切り替えました。FFmpegによる1ストリームの画質往復は確認済みですが、複数ストリームの同時変換は未確認です。日常利用で得た観察は再現条件の探索に使い、固定条件の正式測定とは分けて扱います。
 
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
