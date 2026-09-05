@@ -1,4 +1,7 @@
 
+> [!WARNING]
+> このbranchは、録画のHLSからOriginalへ切り替えた後にNative errorとプレイヤー再起動が連鎖する問題の暫定候補です。DPlayerのNative `error` handlerを1回だけ登録し、現在のvideoとbackendがエラー発生時の対象である場合だけ既存の再起動処理を行います。型検査とLintは通過していますが、iOS実機での反復切替、現在のHLS videoでのNative error、ライブの待機中に画質を切り替えた場合は未確認です。
+
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
 <img width="100%" src="https://github.com/user-attachments/assets/6971f354-0418-4305-bf6d-b061142ffec6">
