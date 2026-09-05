@@ -3312,17 +3312,21 @@ version = "1.6.0"
 description = "The little ASGI library that shines."
 optional = false
 python-versions = ">=3.10"
-files = [
-    {file = "starlette-1.6.0-py3-none-any.whl", hash = "sha256:a86dd39d14bb45f85a3d18525215a9ef0cfd1f192ac793220e72598c90335f0c"},
-    {file = "starlette-1.6.0.tar.gz", hash = "sha256:d4e3ac5e546444960c710297a3c9fc3f7ebae1b7e963f3d36173b49da535be9b"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 anyio = ">=3.6.2,<5"
 typing-extensions = {version = ">=4.10.0", markers = "python_version < \"3.13\""}
 
 [package.extras]
-full = ["httpx (>=0.27.0,<0.29.0)", "httpx2 (>=2.0.0)", "itsdangerous", "jinja2", "python-multipart (>=0.0.18)", "pyyaml"]
+full = ["httpx (>=0.27.0,<0.29.0)", "httpx2 (>=2.0.0)", "itsdangerous", "jinja2", "opentelemetry-api", "python-multipart (>=0.0.18)", "pyyaml"]
+
+[package.source]
+type = "git"
+url = "https://github.com/libratechw/starlette.git"
+reference = "17e3955f997c2f271a08057fe649abadcc482f77"
+resolved_reference = "17e3955f997c2f271a08057fe649abadcc482f77"
 
 [[package]]
 name = "taskipy"
@@ -4075,4 +4079,4 @@ websockets = ">=14.0"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.12"
-content-hash = "17ce50ac349a43e9bf0b3d66d1742bf593ffdac3d083959fc9b3cae043fe849b"
+content-hash = "fcdb003e70619e302ceb933e53186720d55903c3aa2ebefddcde19325b7bb4b9"

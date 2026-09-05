@@ -2440,9 +2440,9 @@ dotenv@^16.3.1:
   resolved "https://registry.yarnpkg.com/dotenv/-/dotenv-16.6.1.tgz#773f0e69527a8315c7285d5ee73c4459d20a8020"
   integrity sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==
 
-"dplayer@github:tsukumijima/DPlayer#v1.33.1":
+"dplayer@github:libratechw/DPlayer#8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512":
   version "1.33.1"
-  resolved "https://codeload.github.com/tsukumijima/DPlayer/tar.gz/a5f847877eada1390456aea4ed7da8e31b4c166e"
+  resolved "https://codeload.github.com/libratechw/DPlayer/tar.gz/8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512"
   dependencies:
     aribb24.js "~1.11.5"
     axios "^1.7.2"
@@ -3970,9 +3970,9 @@ mitt@^3.0.1:
   resolved "https://registry.yarnpkg.com/mitt/-/mitt-3.0.1.tgz#ea36cf0cc30403601ae074c8f77b7092cdab36d1"
   integrity sha512-vKivATfr97l2/QBCYAkXYDbrIWPM2IIKEl7YPhjCvKlG3kE2gm+uBo6nEXK3M5/Ffh/FLpKExzOQ3JJoJGFKBw==
 
-"mpeg2toh264@github:tsukumijima/mpeg2toh264#52a3db5e8fb9833e6cade2167097849c668bdb1f":
+"mpeg2toh264@github:libratechw/mpeg2toh264#52bedadecf8f0e58195a3a94254f14c78e3ae0c5":
   version "0.0.1"
-  resolved "https://codeload.github.com/tsukumijima/mpeg2toh264/tar.gz/52a3db5e8fb9833e6cade2167097849c668bdb1f"
+  resolved "https://codeload.github.com/libratechw/mpeg2toh264/tar.gz/52bedadecf8f0e58195a3a94254f14c78e3ae0c5"
 
 mpegts.js@^1.7.3, "mpegts.js@github:tsukumijima/mpegts.js#c69a71c809b6e0a53f7101455333f8b3d98460d0":
   version "1.8.0"

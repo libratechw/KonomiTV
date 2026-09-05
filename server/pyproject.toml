@@ -42,6 +42,7 @@ requests = "^2.32.4"
 rich = "^13.9.4"
 "ruamel.yaml" = "==0.18.12"
 sse-starlette = "^2.1.3"
+starlette = { git = "https://github.com/libratechw/starlette.git", rev = "17e3955f997c2f271a08057fe649abadcc482f77" }
 taskipy = "^1.14.1"
 tortoise-orm = ">=0.23.0,<1.0.0"
 typer = ">=0.21.0,<1.0.0"
