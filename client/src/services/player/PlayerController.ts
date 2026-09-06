@@ -24,7 +24,13 @@ import useChannelsStore from '@/stores/ChannelsStore';
 import usePlayerStore from '@/stores/PlayerStore';
 import useSettingsStore, { LiveStreamingQuality, LIVE_STREAMING_QUALITIES, VideoStreamingQuality, VIDEO_STREAMING_QUALITIES } from '@/stores/SettingsStore';
 import Utils, { dayjs, PlayerUtils } from '@/utils';
-import { createMpeg2ToH264DiagnosticNotice, recordPublicPlaybackDiagnosticContext } from '@/utils/DiagnosticProvenance';
+import { public_build_provenance } from '@/utils/DiagnosticProvenance';
+import {
+    appendMpeg2ToH264DiagnosticError,
+    clearPublicPlaybackDiagnosticSession,
+    ensurePublicPlaybackDiagnosticSession,
+    recordPublicPlaybackDiagnosticContext,
+} from '@/utils/PlaybackDiagnostics';
 
 
 // デバイスのデコーダーが自動でのデインタレースに対応しているかを取得
@@ -1286,7 +1292,30 @@ class PlayerController {
 
 
     /**
-     * mpeg2toh264のエラーを、DPlayer既存noticeへ公開診断footer付きで表示して停止する。
+     * 現在の再生対象について、公開診断buildのsession headerを1回だけ固定する。
+     * 同じ対象のPlayerController再起動では既存errorを維持し、番組・チャンネル切替では空のsessionへ置き換える。
+     */
+    private ensurePublicPlaybackDiagnosticSession(): void {
+        if (public_build_provenance === null) return;
+
+        const channels_store = useChannelsStore();
+        const player_store = usePlayerStore();
+        const target = this.playback_mode === 'Live' ? {
+            playbackMode: this.playback_mode,
+            mediaTitle: channels_store.channel.current.name,
+            mediaIdentifier: `channel:${channels_store.channel.current.display_channel_id}`,
+        } as const : {
+            playbackMode: this.playback_mode,
+            mediaTitle: player_store.recorded_program.title,
+            mediaIdentifier: `recorded:${player_store.recorded_program.id}`,
+        } as const;
+
+        ensurePublicPlaybackDiagnosticSession(target, player_store.current_quality);
+    }
+
+
+    /**
+     * mpeg2toh264のエラーを公開診断sessionへ追加して停止する。
      * 画質切り替えで破棄済みのpluginから遅れて届いたeventは無視する。
      */
     private handleMpeg2ToH264Error(
@@ -1298,11 +1327,18 @@ class PlayerController {
         const player_store = usePlayerStore();
         const quality_snapshot = this.player.quality?.name ?? player_store.current_quality;
         player_store.current_quality = quality_snapshot;
-        const diagnostic_notice = createMpeg2ToH264DiagnosticNotice(event.detail.error, quality_snapshot);
-        if (diagnostic_notice !== null) {
-            // DPlayerのnotice面・表示時間・色は変えず、footerの改行だけを有効にする。
-            this.player.template.notice.style.whiteSpace = 'pre-line';
-            this.player.notice(diagnostic_notice.message, undefined, undefined, '#FF6F6A');
+        if (public_build_provenance !== null) {
+            let playback_position = Number.NaN;
+            try {
+                playback_position = this.player.video.currentTime;
+            } catch {
+                // currentTimeを取得できなくても、診断表示が再生停止処理を妨げないようにする。
+            }
+            appendMpeg2ToH264DiagnosticError(
+                event.detail.error,
+                quality_snapshot,
+                playback_position,
+            );
         }
         this.player.pause();
     }
@@ -1363,8 +1399,21 @@ class PlayerController {
             // プレイヤーのコントロール UI を表示する
             this.setControlDisplayTimer();
         };
-        this.player.on('play', on_play_or_pause);
+        this.player.on('play', () => {
+            // 録画の自然終了後に同じ番組を再生し直す場合も、前回のerrorを引き継がず新しいsessionを作る。
+            this.ensurePublicPlaybackDiagnosticSession();
+            on_play_or_pause();
+        });
         this.player.on('pause', on_play_or_pause);
+
+        // 録画の自然終了は公開診断上の再生session境界として扱う。
+        // 同じDPlayerで再生し直した場合は上記play handlerが空のsessionを作り直す。
+        if (this.playback_mode === 'Video') {
+            this.player.on('ended', () => {
+                if (public_build_provenance === null) return;
+                clearPublicPlaybackDiagnosticSession();
+            });
+        }
 
         // 再生が一時的に止まってバッファリングしているとき/再び再生されはじめたときのイベント
         // バッファリングの Progress Circular の表示を制御する
@@ -1390,6 +1439,7 @@ class PlayerController {
 
             // DPlayerはquality_start前に選択中画質を更新済みなので、この時点の値を画面と診断snapshotへ共有する
             player_store.current_quality = this.player.quality?.name ?? null;
+            this.ensurePublicPlaybackDiagnosticSession();
             if (this.player.plugins.mpeg2toh264) {
                 recordPublicPlaybackDiagnosticContext(this.player.plugins.mpeg2toh264, player_store.current_quality);
             }

@@ -18,6 +18,7 @@
             :class="{'watch-player__buffering--display': playerStore.is_video_buffering}">
         </v-progress-circular>
         <div class="watch-player__dplayer"></div>
+        <component :is="PlaybackDiagnosticErrors" v-if="PlaybackDiagnosticErrors !== null" />
         <div class="watch-player__dplayer-setting-cover"
             :class="{'watch-player__dplayer-setting-cover--display': playerStore.is_player_setting_panel_open}"
             @click="handleSettingCoverClick"></div>
@@ -45,12 +46,16 @@
 </template>
 <script setup lang="ts">
 
-import { PropType } from 'vue';
+import { defineAsyncComponent, PropType } from 'vue';
 
 import useChannelsStore from '@/stores/ChannelsStore';
 import usePlayerStore from '@/stores/PlayerStore';
 import useSettingsStore from '@/stores/SettingsStore';
 import Utils from '@/utils';
+
+// 通常buildではimport()自体を定数畳み込みで除去し、診断UIを生成bundleへ含めない。
+const PlaybackDiagnosticErrors = import.meta.env.KONOMITV_PUBLIC_BUILD_PROVENANCE === null ? null :
+    defineAsyncComponent(() => import('@/components/Watch/PlaybackDiagnosticErrors.vue'));
 
 // Props の定義
 defineProps({

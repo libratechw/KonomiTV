@@ -35,6 +35,7 @@ import WatchPlayer from '@/components/Watch/Player.vue';
 import usePlayerStore from '@/stores/PlayerStore';
 import useSettingsStore from '@/stores/SettingsStore';
 import Utils from '@/utils';
+import { clearPublicPlaybackDiagnosticSession } from '@/utils/PlaybackDiagnostics';
 
 // ライブ視聴・ビデオ視聴共通の視聴画面
 export default defineComponent({
@@ -93,6 +94,9 @@ export default defineComponent({
     },
     // 終了前に実行
     beforeUnmount() {
+
+        // 公開診断sessionを視聴画面の外へ持ち越さない。
+        clearPublicPlaybackDiagnosticSession();
 
         // PlayerStore に視聴画面を閉じたことを伝える
         this.playerStore.stopWatching();

@@ -6,7 +6,7 @@
 
 ## 診断buildの公開provenance <!-- omit in toc -->
 
-`KONOMITV_PUBLIC_BUILD_MODE=DOGFOOD`または`DIAG`を指定してclientをbuildすると、視聴画面の時刻横に`DOGFOOD <buildId> · <現在画質>`または`DIAG <buildId> · <現在画質>`を常時表示します。指定しない通常buildでは、この表示、mpeg2toh264エラーの診断footer、公開manifestのいずれも生成しません。
+`KONOMITV_PUBLIC_BUILD_MODE=DOGFOOD`または`DIAG`を指定してclientをbuildすると、視聴画面の時刻横に`DOGFOOD <buildId> · <現在画質>`または`DIAG <buildId> · <現在画質>`を常時表示します。mpeg2toh264エラーが発生した場合は、同じ再生セッションのエラーを受信順に残す診断パネルも表示します。指定しない通常buildでは、この表示、診断パネル、診断session state、公開manifestのいずれも生成しません。
 
 provenanceの正本は、build時のKonomiTV Git HEADと依存定義です。Viteは同じobjectをclientへ埋め込み、`client/dist/build-provenance.json`へ出力します。値をREADMEや別のsourceへ転記しません。
 
@@ -25,7 +25,9 @@ cd client
 KONOMITV_PUBLIC_BUILD_MODE=DIAG corepack yarn build
 ```
 
-mpeg2toh264のエラー時は、DPlayerの既存noticeへ受信時点で固定したJST時刻、build ID、mpeg2toh264短縮commit、端末family、OS version、browser、CSS viewport size、devicePixelRatio、現在画質、event IDを追記します。lifecycle traceがある場合は、最初のcritical eventと直近のMediaSource `sourceclose`について、失敗時と同じplayer・generation・videoか、MediaSourceのowner / class、失敗までの時間、画質切替の世代・切替元・切替先も表示します。内部の数値ID自体は表示しません。Apple端末の正確なmodelは推定せず、raw User-Agent、IP address、file path、token、録画・番組の内部IDは含めません。
+診断パネルの共通headerは、再生開始時点のbuild ID、KonomiTV / mpeg2toh264短縮commit、端末family、OS version、browser、CSS viewport size、devicePixelRatio、再生種別、初期画質、再生対象を1回だけ表示します。録画は番組名と録画ID、ライブはチャンネル名と表示チャンネルIDで識別します。Apple端末の正確なmodelは推定せず、raw User-Agent、IP address、file path、tokenは含めません。
+
+各エラーは発生順の連番、lifecycle snapshotの凍結時刻（traceがない場合は受信時刻）、受信時の再生位置、現在画質、エラー内容、event IDを不変snapshotとして追加し、時刻はJSTで表示します。lifecycle traceがある場合は、最初のcritical eventと直近のMediaSource `sourceclose`について、失敗時と同じplayer・generation・videoか、MediaSourceのowner / class、失敗までの時間、画質切替の世代・切替元・切替先も表示します。内部のplayer・generation・videoの数値ID自体は表示しません。パネルは映像の半分未満を上限にスクロールでき、DPlayerのnoticeが消えた後も同じ再生セッション中は残ります。PlayerControllerだけを再起動した場合は履歴を維持します。録画の自然終了時、別の番組・チャンネルへの切り替え時、視聴画面から離れた時に履歴を破棄し、同じ録画を再生し直す場合も新しい空のsessionを作ります。
 
 統合診断版ではlifecycle対応mpeg2toh264をpinし、同packageがexportする`isLifecycleError()`を通過したErrorだけから、`lifecycleEventId`、`frozenAt`、同じruntime-frozen trace objectを採用します。guardを通過しないErrorでは相関不能を`event unavailable`と明示し、別のevent IDは作りません。公開可能なclient contextは`recordDiagnosticLifecycle()`経由で同じring bufferへ渡します。配備検証はguard、clock、recorder、event ID上限、trace容量をexportするlifecycle対応pinを必須とします。
 

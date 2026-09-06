@@ -98,6 +98,12 @@ const createPublicBuildProvenance = (): PublicBuildProvenance | null => {
 
 
 const public_build_provenance = createPublicBuildProvenance();
+const playback_diagnostics_module_path = fileURLToPath(new URL(
+    public_build_provenance === null ?
+        './src/utils/PlaybackDiagnostics.disabled.ts' :
+        './src/utils/PlaybackDiagnostics.ts',
+    import.meta.url,
+));
 const publicBuildProvenancePlugin = (): Plugin => ({
     name: 'konomitv-public-build-provenance',
     generateBundle() {
@@ -137,7 +143,16 @@ export default defineConfig({
         },
     },
     resolve: {
-        alias: {'@': fileURLToPath(new URL('./src', import.meta.url))},
+        alias: [
+            {
+                find: '@/utils/PlaybackDiagnostics',
+                replacement: playback_diagnostics_module_path,
+            },
+            {
+                find: '@',
+                replacement: fileURLToPath(new URL('./src', import.meta.url)),
+            },
+        ],
         extensions: ['.js', '.json', '.jsx', '.mjs', '.ts', '.tsx', '.vue'],
     },
     // mpeg2toh264 は配布済みの Worker を import.meta.url から解決するため、依存関係の事前バンドルから除外する
