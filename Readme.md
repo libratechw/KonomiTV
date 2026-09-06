@@ -2,26 +2,26 @@
 > [!WARNING]
 > **このbranchは、KonomiTVを日常利用しながら複数componentの変更を統合検証するdogfood版です。branch全体をupstreamへ取り込むことは想定していません。**
 >
-> **配備状態：EVO-X2の専用環境へ試験配備中。** 録画Original、ライブのOriginal→720p→Original往復、異常終了後の自動復帰を確認しています。VCEEncCは実ライブで終了するため、配備設定ではFFmpegを使います。720pの実機試験では1280×720で再生が進み、`docker stats`のCPU使用率は56.20〜59.70%でした。EVO-X2再起動後の自動起動と、複数ストリームを同時に変換する場合の余力は未確認です。
+> **配備状態：2026年9月7日からEVO-X2の専用環境へ試験配備中。** 録画Original、ライブOriginal、Original→720p→Originalの画質往復をsmoke testします。VCEEncCは実ライブで終了するため、配備設定ではFFmpegを使います。
 
-このbranchはKonomiTV `ea1962f84c22265c1d31081dfe41cc3b53e9a555`を基点に、次の変更を固定しています。
+このbranchはKonomiTV `5167612f1570c53c8dc7132a5792524244193d6f`を基点に、次の変更を固定しています。
 
 | component | commit | 内容 |
 | --- | --- | --- |
 | DPlayer | [`8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512`](https://github.com/libratechw/DPlayer/commit/8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512) | 画質切替後に旧videoのeventや`play()`失敗が現行videoへ作用する経路を除く候補 |
-| mpeg2toh264 | [`52bedadecf8f0e58195a3a94254f14c78e3ae0c5`](https://github.com/libratechw/mpeg2toh264/commit/52bedadecf8f0e58195a3a94254f14c78e3ae0c5) | iOSの`InvalidStateError`へMSE operationと失敗時stateを追加する診断版 |
+| mpeg2toh264 | [`7e917a6de2d78a09cbef7abfec7c1942ee4a9e1f`](https://github.com/libratechw/mpeg2toh264/commit/7e917a6de2d78a09cbef7abfec7c1942ee4a9e1f) | Galaxyでpage cadenceが約30Hzへ低下した場合だけ、1×1 pixelのsurface更新を有限試行し、60Hzへ回復した場合だけ継続するdogfood実験 |
 | Starlette | [`17e3955f997c2f271a08057fe649abadcc482f77`](https://github.com/libratechw/starlette/commit/17e3955f997c2f271a08057fe649abadcc482f77) | `FileResponse`がASGI 2.4未満のクライアント切断後にfileを読み続ける問題への参照実装 |
 
 生成した主要client assetは次のとおりです。
 
 | asset | SHA-256 |
 | --- | --- |
-| `PlayerController-C4vhFqYf.js` | `2d578edbd26981c17d1b6b252c1928c8a9b1465c6e4e8f58bcfbff4c346b9a3b` |
-| `worker-CpkyDHSk.CZ-06WIb.js` | `f2b03987f00cbc93b5a2b24a1134240b20ec4ffe27f5c6b6d45a0279fa31eff0` |
+| `PlayerController-C1Y5auEF.js` | `95a0141f2b7986c683045f77eb2a9a54f0d5fff8edd80e3ace1233874103d871` |
+| `worker-lbyVSV4o.mpE9_GHK.js` | `db86b15cd8b32eb5a14acdf1a042bf6b4e43b76c577ab24bbf54a44552fd0b8c` |
 
-DPlayer候補はbuild・testとGalaxyでの画質切替A/Bを通過しています。Starlette変更は単体test、backend直結試験、2素材のWindows実視聴比較を完了しています。mpeg2toh264の変更は診断情報の追加であり、iOSの再生停止を修正するものではありません。
+DPlayer候補はbuild・testとGalaxyでの画質切替A/Bを通過しています。Starlette変更は単体test、backend直結試験、Windows実視聴比較を完了しています。mpeg2toh264実験は、固定した1×1 pixel・4Hz更新がGalaxyの固定60Hz／120Hzの各30分走行で約30Hzへの制限と大きなrVFC欠落を防いだ結果を、端末名に依存せず実行時のpage cadenceから適用するものです。自動test、型検査、bundle buildは完了していますが、この適応実装自体の実機効果と他端末での非発動は未確認です。
 
-既知の未解決問題は、iPhone / iPadでOriginalへ切り替えた際の`InvalidStateError`と、GalaxyのライブOriginalでWorker描画が大きくコマ落ちする現象です。EVO-X2ではVCEEncCのOpenCL経路が実ライブを処理できないため、dogfood環境をFFmpegへ切り替えました。FFmpegによる1ストリームの画質往復は確認済みですが、複数ストリームの同時変換は未確認です。日常利用で得た観察は再現条件の探索に使い、固定条件の正式測定とは分けて扱います。
+既知の未解決問題は、iPhone / iPadでOriginalへ切り替えた際の`InvalidStateError`です。適応型surface更新はGalaxyのライブOriginalに対する暫定実験であり、取り込み候補ではありません。録画Original、24fps区間、画質切替、fullscreen、Galaxyの通常60Hz／120Hz、POCOとiOSでの非発動を確認してから採否を判断します。FFmpegによる1ストリームの画質往復は旧配備で確認済みですが、複数ストリームの同時変換とEVO-X2再起動後の自動起動は未確認です。日常利用で得た観察は再現条件の探索に使い、固定条件の正式測定とは分けて扱います。
 
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
