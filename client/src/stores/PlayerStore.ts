@@ -132,6 +132,10 @@ const usePlayerStore = defineStore('player', {
         // null の間は回線種別から選び、チャンネル切り替えなどでプレイヤーを作り直すときは手動選択を引き継ぐ
         selected_quality_profile_type: null as 'Wi-Fi' | 'Cellular' | null,
 
+        // 現在DPlayerが選択している画質名
+        // 診断・dogfood buildの画面表示とエラー受信時のsnapshotに使う
+        current_quality: null as string | null,
+
         // ビデオ視聴: CacheStorage に保存した単一画質を再生しているか
         is_offline_playback: false,
 
@@ -242,6 +246,7 @@ const usePlayerStore = defineStore('player', {
             this.is_zapping = false;
             this.is_player_setting_panel_open = false;
             this.selected_quality_profile_type = null;
+            this.current_quality = null;
             this.is_offline_playback = false;
             this.offline_video = null;
             this.is_loading = true;

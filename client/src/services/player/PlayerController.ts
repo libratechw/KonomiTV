@@ -3,7 +3,7 @@ import assert from 'assert';
 
 import DPlayer, { DPlayerType } from 'dplayer';
 import Hls from 'hls.js';
-import { Mpeg2TsPlayer } from 'mpeg2toh264/player';
+import { Mpeg2TsPlayer, type Mpeg2TsPlayerEventMap } from 'mpeg2toh264/player';
 import { Deinterlacer, probeDecoder, supportsDeinterlace, type DecoderProbe } from 'mpeg2toh264/yadif';
 import mpegts from 'mpegts.js';
 import { watch } from 'vue';
@@ -24,6 +24,7 @@ import useChannelsStore from '@/stores/ChannelsStore';
 import usePlayerStore from '@/stores/PlayerStore';
 import useSettingsStore, { LiveStreamingQuality, LIVE_STREAMING_QUALITIES, VideoStreamingQuality, VIDEO_STREAMING_QUALITIES } from '@/stores/SettingsStore';
 import Utils, { dayjs, PlayerUtils } from '@/utils';
+import { createMpeg2ToH264DiagnosticNotice, recordPublicPlaybackDiagnosticContext } from '@/utils/DiagnosticProvenance';
 
 
 // デバイスのデコーダーが自動でのデインタレースに対応しているかを取得
@@ -1285,6 +1286,29 @@ class PlayerController {
 
 
     /**
+     * mpeg2toh264のエラーを、DPlayer既存noticeへ公開診断footer付きで表示して停止する。
+     * 画質切り替えで破棄済みのpluginから遅れて届いたeventは無視する。
+     */
+    private handleMpeg2ToH264Error(
+        mpeg2toh264_player: Mpeg2TsPlayer,
+        event: Mpeg2TsPlayerEventMap['error'],
+    ): void {
+        if (this.destroyed === true || this.player?.plugins.mpeg2toh264 !== mpeg2toh264_player) return;
+
+        const player_store = usePlayerStore();
+        const quality_snapshot = this.player.quality?.name ?? player_store.current_quality;
+        player_store.current_quality = quality_snapshot;
+        const diagnostic_notice = createMpeg2ToH264DiagnosticNotice(event.detail.error, quality_snapshot);
+        if (diagnostic_notice !== null) {
+            // DPlayerのnotice面・表示時間・色は変えず、footerの改行だけを有効にする。
+            this.player.template.notice.style.whiteSpace = 'pre-line';
+            this.player.notice(diagnostic_notice.message, undefined, undefined, '#FF6F6A');
+        }
+        this.player.pause();
+    }
+
+
+    /**
      * DPlayer に動画再生系のイベントハンドラーを登録する
      * 特にライブ視聴ではここで適切に再生状態の管理 (再生可能かどうか、エラーが発生していないかなど) を行う必要がある
      */
@@ -1364,6 +1388,12 @@ class PlayerController {
         const on_init_or_quality_change = async () => {
             assert(this.player !== null);
 
+            // DPlayerはquality_start前に選択中画質を更新済みなので、この時点の値を画面と診断snapshotへ共有する
+            player_store.current_quality = this.player.quality?.name ?? null;
+            if (this.player.plugins.mpeg2toh264) {
+                recordPublicPlaybackDiagnosticContext(this.player.plugins.mpeg2toh264, player_store.current_quality);
+            }
+
             // ローディング中の背景写真をランダムに変更
             player_store.background_url = PlayerUtils.generatePlayerBackgroundURL();
 
@@ -1407,9 +1437,10 @@ class PlayerController {
                     this.player.video.oncanplaythrough = on_canplay;
 
                     // 変換処理が失敗した場合は DPlayer のエラー表示を残し、プレイヤーを停止状態にする
-                    mpeg2toh264_player.addEventListener('error', () => {
+                    mpeg2toh264_player.addEventListener('error', (event) => {
+                        if (this.destroyed === true || this.player?.plugins.mpeg2toh264 !== mpeg2toh264_player) return;
                         window.clearTimeout(startup_timeout_id);
-                        this.player?.pause();
+                        this.handleMpeg2ToH264Error(mpeg2toh264_player, event);
                     }, {once: true});
                     this.player.play();
 
@@ -1742,8 +1773,9 @@ class PlayerController {
 
                 // mpeg2toh264 の再生中になんらかの再生エラーが発生した場合は、エラー状態を明示するために自動で HLS 画質へ切り替わらないようにする
                 if (this.player.type === 'mpeg2toh264' && this.player.plugins.mpeg2toh264) {
-                    this.player.plugins.mpeg2toh264.addEventListener('error', () => {
-                        this.player?.pause();
+                    const mpeg2toh264_player = this.player.plugins.mpeg2toh264;
+                    mpeg2toh264_player.addEventListener('error', (event) => {
+                        this.handleMpeg2ToH264Error(mpeg2toh264_player, event);
                     }, {once: true});
                 }
             }

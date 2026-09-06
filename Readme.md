@@ -1,27 +1,33 @@
 
 > [!WARNING]
-> **このbranchは、KonomiTVを日常利用しながら複数componentの変更を統合検証するdogfood版です。branch全体をupstreamへ取り込むことは想定していません。**
+> **このbranchは、診断版・dogfood版を日常利用中の画面から識別するための統合実装です。branch全体をupstreamへ取り込むことは想定していません。**
 >
-> **配備状態：EVO-X2の専用環境へ試験配備中。** 録画Original、ライブのOriginal→720p→Original往復、異常終了後の自動復帰を確認しています。VCEEncCは実ライブで終了するため、配備設定ではFFmpegを使います。720pの実機試験では1280×720で再生が進み、`docker stats`のCPU使用率は56.20〜59.70%でした。EVO-X2再起動後の自動起動と、複数ストリームを同時に変換する場合の余力は未確認です。
+> **配備状態：未配備。** port 7000のproductionと、port 7016 / 7017の既存dogfood・診断環境を変更せず、隔離portで検証してから配備用branchへ統合します。
 
-このbranchはKonomiTV `ea1962f84c22265c1d31081dfe41cc3b53e9a555`を基点に、次の変更を固定しています。
+## 診断buildの公開provenance <!-- omit in toc -->
 
-| component | commit | 内容 |
-| --- | --- | --- |
-| DPlayer | [`8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512`](https://github.com/libratechw/DPlayer/commit/8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512) | 画質切替後に旧videoのeventや`play()`失敗が現行videoへ作用する経路を除く候補 |
-| mpeg2toh264 | [`52bedadecf8f0e58195a3a94254f14c78e3ae0c5`](https://github.com/libratechw/mpeg2toh264/commit/52bedadecf8f0e58195a3a94254f14c78e3ae0c5) | iOSの`InvalidStateError`へMSE operationと失敗時stateを追加する診断版 |
-| Starlette | [`17e3955f997c2f271a08057fe649abadcc482f77`](https://github.com/libratechw/starlette/commit/17e3955f997c2f271a08057fe649abadcc482f77) | `FileResponse`がASGI 2.4未満のクライアント切断後にfileを読み続ける問題への参照実装 |
+`KONOMITV_PUBLIC_BUILD_MODE=DOGFOOD`または`DIAG`を指定してclientをbuildすると、視聴画面の時刻横に`DOGFOOD <buildId> · <現在画質>`または`DIAG <buildId> · <現在画質>`を常時表示します。指定しない通常buildでは、この表示、mpeg2toh264エラーの診断footer、公開manifestのいずれも生成しません。
 
-生成した主要client assetは次のとおりです。
+provenanceの正本は、build時のKonomiTV Git HEADと依存定義です。Viteは同じobjectをclientへ埋め込み、`client/dist/build-provenance.json`へ出力します。値をREADMEや別のsourceへ転記しません。
 
-| asset | SHA-256 |
+| 公開値 | build時の取得元 |
 | --- | --- |
-| `PlayerController-C4vhFqYf.js` | `2d578edbd26981c17d1b6b252c1928c8a9b1465c6e4e8f58bcfbff4c346b9a3b` |
-| `worker-CpkyDHSk.CZ-06WIb.js` | `f2b03987f00cbc93b5a2b24a1134240b20ec4ffe27f5c6b6d45a0279fa31eff0` |
+| `buildId`, `components.konomiTV` | cleanなKonomiTV worktreeのGit HEAD |
+| `components.dplayer`, `components.mpeg2toh264` | `client/package.json`の40桁commit pin |
+| `components.starlette` | `server/pyproject.toml`の40桁`rev` |
 
-DPlayer候補はbuild・testとGalaxyでの画質切替A/Bを通過しています。Starlette変更は単体test、backend直結試験、2素材のWindows実視聴比較を完了しています。mpeg2toh264の変更は診断情報の追加であり、iOSの再生停止を修正するものではありません。
+Git worktreeに未commitの変更がある場合や、依存が40桁commitへ固定されていない場合、provenance付きbuildは失敗します。配備manifestは`build-provenance.json`のSHA-256、配信した主要assetのSHA-256、隔離serverから取得したassetのSHA-256を記録し、この公開manifestへ対応付けます。
 
-既知の未解決問題は、iPhone / iPadでOriginalへ切り替えた際の`InvalidStateError`と、GalaxyのライブOriginalでWorker描画が大きくコマ落ちする現象です。EVO-X2ではVCEEncCのOpenCL経路が実ライブを処理できないため、dogfood環境をFFmpegへ切り替えました。FFmpegによる1ストリームの画質往復は確認済みですが、複数ストリームの同時変換は未確認です。日常利用で得た観察は再現条件の探索に使い、固定条件の正式測定とは分けて扱います。
+`client/scripts/validate-public-build.mjs`は、生成manifest、cleanなKonomiTV source commit、package / lockfileのpin、componentのsource / dist commit、実際にinstallされたruntime、`index.html`から参照されたentryとPlayerController、PlayerControllerから参照されたmpeg2toh264 Workerを照合します。隔離serverの応答byteも同じlocal assetと一致した場合だけ、配備用build manifestを新規作成します。Worker名はglobで推測しません。
+
+```bash
+cd client
+KONOMITV_PUBLIC_BUILD_MODE=DIAG corepack yarn build
+```
+
+mpeg2toh264のエラー時は、DPlayerの既存noticeへ受信時点で固定したJST時刻、build ID、mpeg2toh264短縮commit、端末family、OS version、browser、CSS viewport size、devicePixelRatio、現在画質、event IDだけを追記します。Apple端末の正確なmodelは推定せず、raw User-Agent、IP address、file path、token、録画・番組の内部IDは含めません。
+
+統合診断版ではlifecycle対応mpeg2toh264をpinし、同packageがexportする`isLifecycleError()`を通過したErrorだけから、`lifecycleEventId`、`frozenAt`、同じruntime-frozen trace objectを採用します。guardを通過しないErrorでは相関不能を`event unavailable`と明示し、別のevent IDは作りません。公開可能なclient contextは`recordDiagnosticLifecycle()`経由で同じring bufferへ渡します。配備検証はguard、clock、recorder、event ID上限、trace容量をexportするlifecycle対応pinを必須とします。
 
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 

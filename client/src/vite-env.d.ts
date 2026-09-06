@@ -121,6 +121,24 @@ declare module 'vue-virtual-scroller' {
 
 declare global {
 
+    // 診断・dogfood buildにだけ埋め込まれる公開provenance
+    interface ImportMetaEnv {
+        readonly KONOMITV_PUBLIC_BUILD_PROVENANCE: Readonly<{
+            schemaVersion: 1;
+            mode: 'DOGFOOD' | 'DIAG';
+            buildId: string;
+            components: Readonly<{
+                konomiTV: string;
+                dplayer: string;
+                mpeg2toh264: string;
+                starlette: string;
+            }>;
+        }> | null;
+    }
+    interface ImportMeta {
+        readonly env: ImportMetaEnv;
+    }
+
     // location.reload() の forceReload 引数
     // ref: https://developer.mozilla.org/en-US/docs/Web/API/Location/reload
     interface Location {

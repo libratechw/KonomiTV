@@ -1,18 +1,23 @@
 <template>
-    <header class="watch-header" :class="{'watch-header--video': playback_mode === 'Video'}">
-        <router-link class="watch-header__back-icon" v-ripple :to="playback_mode === 'Live' ? '/tv/' : '/videos/'">
+    <header class="watch-header" :class="{
+            'watch-header--video': playback_mode === 'Video',
+            'watch-header--public-provenance': public_build_label !== null,
+            'watch-header--controls-hidden': public_build_label !== null && playerStore.is_control_display === false,
+        }">
+        <router-link class="watch-header__back-icon watch-header__ordinary" v-ripple :to="playback_mode === 'Live' ? '/tv/' : '/videos/'">
             <Icon icon="fluent:chevron-left-12-filled" width="21px" />
         </router-link>
-        <img class="watch-header__broadcaster" v-if="playback_mode === 'Live'"
+        <img class="watch-header__broadcaster watch-header__ordinary" v-if="playback_mode === 'Live'"
             :src="`${Utils.api_base_url}/channels/${channelsStore.channel.current.id}/logo`">
-        <span class="watch-header__program-title" v-html="ProgramUtils.decorateProgramInfo(
+        <span class="watch-header__program-title watch-header__ordinary" v-html="ProgramUtils.decorateProgramInfo(
             playback_mode === 'Live' ? channelsStore.channel.current.program_present : playerStore.recorded_program, 'title'
         )"></span>
-        <span class="watch-header__program-time">
+        <span class="watch-header__program-time watch-header__ordinary">
             {{ProgramUtils.getProgramTime(playback_mode === 'Live' ? channelsStore.channel.current.program_present : playerStore.recorded_program, true)}}
         </span>
-        <v-spacer></v-spacer>
-        <span class="watch-header__now">
+        <v-spacer class="watch-header__ordinary"></v-spacer>
+        <span v-if="public_build_label !== null" class="watch-header__public-provenance">{{public_build_label}}</span>
+        <span class="watch-header__now watch-header__ordinary">
             <Icon v-if="is_showing_original_broadcast_time" class="watch-header__timeshift-icon" icon="fluent:history-16-regular" width="16px" />
             {{time}}
         </span>
@@ -29,6 +34,7 @@ import useChannelsStore from '@/stores/ChannelsStore';
 import usePlayerStore from '@/stores/PlayerStore';
 import useSettingsStore from '@/stores/SettingsStore';
 import Utils, { dayjs, ProgramUtils } from '@/utils';
+import { formatPublicBuildLabel } from '@/utils/DiagnosticProvenance';
 
 export default defineComponent({
     name: 'Watch-Header',
@@ -57,6 +63,11 @@ export default defineComponent({
     },
     computed: {
         ...mapStores(useChannelsStore, usePlayerStore, useSettingsStore),
+
+        // 診断・dogfood buildだけに表示する、現在画質を含む短い公開provenance
+        public_build_label(): string | null {
+            return formatPublicBuildLabel(this.playerStore.current_quality);
+        },
 
         // 元の放送時刻を表示すべきかどうか
         // 録画再生時かつ設定がオンの場合に true
@@ -143,6 +154,21 @@ export default defineComponent({
     opacity: 0;
     visibility: hidden;
     z-index: 5;
+
+    // provenanceが埋め込まれたbuildでは、操作UIを隠している間も短い識別表示だけを残す
+    &.watch-header--public-provenance {
+        opacity: 1 !important;
+        visibility: visible !important;
+    }
+    &.watch-header--controls-hidden {
+        pointer-events: none;
+        background: none;
+
+        .watch-header__ordinary {
+            opacity: 0;
+            visibility: hidden;
+        }
+    }
 
     @include tablet-vertical {
         height: 66px;
@@ -303,6 +329,20 @@ export default defineComponent({
             margin-right: 4px;
             opacity: 0.8;
         }
+    }
+
+    .watch-header__public-provenance {
+        flex-shrink: 0;
+        padding: 3px 6px;
+        border: 1px solid #ffffff52;
+        border-radius: 4px;
+        background: #000000a8;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
     }
 }
 

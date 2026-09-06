@@ -10,7 +10,8 @@
         "build": "vue-tsc --noEmit && vite build",
         "preview": "concurrently --raw \"npm:akebi\" \"vite preview\"",
         "lint": "eslint . --fix --ignore-path .gitignore",
-        "typecheck": "vue-tsc --noEmit"
+        "typecheck": "vue-tsc --noEmit",
+        "validate:public-build": "node scripts/validate-public-build.mjs"
     },
     "engines": {
         "node": "^20.16.0"
@@ -25,12 +26,12 @@
         "comlink": "^4.4.1",
         "copy-image-clipboard": "^2.1.2",
         "dayjs": "^1.11.13",
-        "dplayer": "github:libratechw/DPlayer#8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512",
+        "dplayer": "github:libratechw/DPlayer#f9ac9d9f07ea6dbfd678992953ca7ee35b9c2f68",
         "floating-vue": "^5.2.2",
         "hls.js": "^1.6.9",
         "idb": "^8.0.3",
         "mitt": "^3.0.1",
-        "mpeg2toh264": "github:libratechw/mpeg2toh264#a3c0cd3dc9cae8c6c1493427f6a762dd4de8b25c",
+        "mpeg2toh264": "github:libratechw/mpeg2toh264#68c1c21734d193b646070d9ff003786757550080",
         "mpegts.js": "github:tsukumijima/mpegts.js#c69a71c809b6e0a53f7101455333f8b3d98460d0",
         "nanoid": "^5.1.16",
         "ohash": "^1.1.3",
