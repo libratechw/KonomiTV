@@ -2,7 +2,7 @@
 > [!WARNING]
 > **このbranchは、診断版・dogfood版を日常利用中の画面から識別するための統合実装です。branch全体をupstreamへ取り込むことは想定していません。**
 >
-> **配備状態：未配備。** port 7000のproductionと、port 7016 / 7017の既存dogfood・診断環境を変更せず、隔離portで検証してから配備用branchへ統合します。
+> **配備状態：診断用の隔離port 7018へ配備済み。** 配備buildのsource commitは`034fc69`です。port 7000のproductionと、port 7016 / 7017の既存dogfood・診断環境は変更していません。配信assetとローカルdistの一致、認証済み実画面のbuild・画質表示、実lifecycle errorのdispatch IDと画面footer IDの一致を確認しました。
 
 ## 診断buildの公開provenance <!-- omit in toc -->
 
