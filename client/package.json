@@ -18,7 +18,7 @@
     "dependencies": {
         "@github/mini-throttle": "^2.1.1",
         "@microsoft/fetch-event-source": "^2.0.1",
-        "@tsukumijima/aribts": "github:tsukumijima/node-aribts#v1.5.3",
+        "arib-mmt-tlv-ts": "^2.0.2",
         "assert": "^2.1.0",
         "axios": "^1.16.0",
         "buffer": "^6.0.3",
@@ -30,8 +30,8 @@
         "hls.js": "^1.6.9",
         "idb": "^8.0.3",
         "mitt": "^3.0.1",
-        "mpeg2toh264": "github:libratechw/mpeg2toh264#52bedadecf8f0e58195a3a94254f14c78e3ae0c5",
-        "mpegts.js": "github:tsukumijima/mpegts.js#c69a71c809b6e0a53f7101455333f8b3d98460d0",
+        "mpeg2toh264": "github:libratechw/mpeg2toh264#7e917a6de2d78a09cbef7abfec7c1942ee4a9e1f",
+        "mpegts.js": "github:tsukumijima/mpegts.js#bf4e49d0ff004cf7546237393a62c66e4b926dca",
         "nanoid": "^5.1.16",
         "ohash": "^1.1.3",
         "piexifjs": "^2.0.0-beta.9",
@@ -46,7 +46,7 @@
         "vue-virtual-scroller": "^2.0.0-beta.8",
         "vuedraggable": "^4.1.0",
         "vuetify": "~3.7.1",
-        "web-bml": "github:tsukumijima/web-bml#6448ad51179048cedf9fae78d1c9e1c87ac395e6"
+        "web-bml": "github:tsukumijima/web-bml#47fec53cd66734d6cba0fff3c6dfcfc150043109"
     },
     "devDependencies": {
         "@babel/types": "^7.25.4",
