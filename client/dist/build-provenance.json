@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "mode": "DIAG",
+  "buildId": "371a7dc",
+  "components": {
+    "konomiTV": "371a7dca0ecfebcf34453fe4fa7f632f54a29276",
+    "dplayer": "f9ac9d9f07ea6dbfd678992953ca7ee35b9c2f68",
+    "mpeg2toh264": "68c1c21734d193b646070d9ff003786757550080",
+    "starlette": "17e3955f997c2f271a08057fe649abadcc482f77"
+  }
+}
