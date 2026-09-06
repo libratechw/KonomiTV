@@ -25,7 +25,7 @@ cd client
 KONOMITV_PUBLIC_BUILD_MODE=DIAG corepack yarn build
 ```
 
-mpeg2toh264のエラー時は、DPlayerの既存noticeへ受信時点で固定したJST時刻、build ID、mpeg2toh264短縮commit、端末family、OS version、browser、CSS viewport size、devicePixelRatio、現在画質、event IDだけを追記します。Apple端末の正確なmodelは推定せず、raw User-Agent、IP address、file path、token、録画・番組の内部IDは含めません。
+mpeg2toh264のエラー時は、DPlayerの既存noticeへ受信時点で固定したJST時刻、build ID、mpeg2toh264短縮commit、端末family、OS version、browser、CSS viewport size、devicePixelRatio、現在画質、event IDを追記します。lifecycle traceがある場合は、最初のcritical eventと直近のMediaSource `sourceclose`について、失敗時と同じplayer・generation・videoか、MediaSourceのowner / class、失敗までの時間、画質切替の世代・切替元・切替先も表示します。内部の数値ID自体は表示しません。Apple端末の正確なmodelは推定せず、raw User-Agent、IP address、file path、token、録画・番組の内部IDは含めません。
 
 統合診断版ではlifecycle対応mpeg2toh264をpinし、同packageがexportする`isLifecycleError()`を通過したErrorだけから、`lifecycleEventId`、`frozenAt`、同じruntime-frozen trace objectを採用します。guardを通過しないErrorでは相関不能を`event unavailable`と明示し、別のevent IDは作りません。公開可能なclient contextは`recordDiagnosticLifecycle()`経由で同じring bufferへ渡します。配備検証はguard、clock、recorder、event ID上限、trace容量をexportするlifecycle対応pinを必須とします。
 

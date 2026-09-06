@@ -3,6 +3,7 @@ import {
     isLifecycleError,
     lifecycleNow,
     type LifecycleTraceDetail,
+    type LifecycleTraceEntry,
     type LifecycleTraceSnapshot,
     type Mpeg2TsPlayer,
 } from 'mpeg2toh264/player';
@@ -126,6 +127,70 @@ const normalizeQuality = (quality: string | null): string => {
 };
 
 
+const TRACE_DETAIL_FIELDS = [
+    ['qualitySwitchGeneration', 'qs'],
+    ['fromQualityIndex', 'from'],
+    ['toQualityIndex', 'to'],
+    ['currentVideo', 'current'],
+    ['reason', 'reason'],
+    ['attachment', 'attachment'],
+    ['hadAttachment', 'attached'],
+    ['stoppedGeneration', 'stopped-generation'],
+] as const;
+
+
+const compactTraceValue = (value: string | number | boolean | null): string => {
+    if (value === null) return 'null';
+    return String(value).replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 40);
+};
+
+
+/**
+ * Screenshotだけでも、原因候補のeventとsourcecloseが失敗したplayer世代に
+ * 属するかを判定できる最小限のtrace identityを表示する。
+ */
+const formatTraceEntry = (
+    label: 'first' | 'close',
+    entry: LifecycleTraceEntry,
+    failure_entry: LifecycleTraceEntry,
+    frozen_at: number,
+): string => {
+    const relation = [
+        `p:${entry.playerInstance === failure_entry.playerInstance ? 'same' : 'other'}`,
+        `g:${entry.generation === failure_entry.generation ? 'same' : 'other'}`,
+        `v:${entry.videoId === failure_entry.videoId ? 'same' : 'other'}`,
+    ].join(' ');
+    const details = TRACE_DETAIL_FIELDS.flatMap(([field, alias]) => {
+        const value = entry.detail[field];
+        return value === undefined ? [] : [`${alias}=${compactTraceValue(value)}`];
+    });
+    const age = Math.max(0, Math.round(frozen_at - entry.at));
+    return [
+        `${label} ${entry.event}`,
+        `${entry.scope}/${entry.mediaSourceOwner}/${entry.mediaSourceClass ?? 'class-unavailable'}`,
+        relation,
+        `age=${age}ms`,
+        ...details,
+    ].join(' · ');
+};
+
+
+const summarizeLifecycleTrace = (trace: LifecycleTraceSnapshot): readonly string[] => {
+    const failure_entry = [...trace.entries].reverse().find((entry) => entry.event === 'player-fail') ?? trace.entries.at(-1);
+    if (failure_entry === undefined) return [];
+
+    const lines: string[] = [];
+    if (trace.firstCritical !== null) {
+        lines.push(formatTraceEntry('first', trace.firstCritical, failure_entry, trace.frozenAt));
+    }
+    const source_close = [...trace.entries].reverse().find((entry) => entry.event === 'mediasource-sourceclose');
+    if (source_close !== undefined && source_close.sequence !== trace.firstCritical?.sequence) {
+        lines.push(formatTraceEntry('close', source_close, failure_entry, trace.frozenAt));
+    }
+    return lines;
+};
+
+
 /**
  * mpeg2toh264自身のguardが完全性を確認したsnapshotだけを採用する。
  */
@@ -186,6 +251,7 @@ export const createMpeg2ToH264DiagnosticNotice = (
     const quality_snapshot = normalizeQuality(quality);
     const footer = [
         `${public_build_provenance.mode} ${public_build_provenance.buildId} · m2h ${public_build_provenance.components.mpeg2toh264.slice(0, 7)} · event ${event_id ?? 'unavailable'}`,
+        ...(lifecycle_reference === null ? [] : summarizeLifecycleTrace(lifecycle_reference.trace)),
         `${dayjs(frozen_at).tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss.SSS [JST]')} · ${facts.deviceFamily} · ${facts.os} · ${facts.browser}`,
         `${facts.viewportWidth}x${facts.viewportHeight} CSS viewport · DPR ${facts.devicePixelRatio} · ${quality_snapshot}`,
     ].join('\n');
