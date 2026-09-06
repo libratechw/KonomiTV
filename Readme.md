@@ -13,6 +13,7 @@
 | Starlette | [`17e3955f997c2f271a08057fe649abadcc482f77`](https://github.com/libratechw/starlette/commit/17e3955f997c2f271a08057fe649abadcc482f77) | `FileResponse`がASGI 2.4未満のクライアント切断後にfileを読み続ける問題への参照実装 |
 
 生成した主要client assetは次のとおりです。
+Git管理の`client/dist`と配備imageは、DockerfileのNode.js 20.16.0で生成した同じ成果物です。
 
 | asset | SHA-256 |
 | --- | --- |
