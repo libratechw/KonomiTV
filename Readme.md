@@ -1,8 +1,10 @@
 
 > [!WARNING]
-> **このbranchは、複数componentの製品候補変更を日常利用で統合検証するdogfood版です。branch全体をupstreamへ取り込むことは想定していません。**
+> **`dogfood/product-candidates`は、新しい上流から作り直した製品候補branchです。個別commit単位の評価・取込み用であり、branch全体のupstream取込みは想定していません。計測実験のadaptive-surfaceと不要なcustom Starletteは含みません。**
 >
-> 基点は `tsukumijima/KonomiTV` master `cc9f340cde56f9e1343dc212600a78b607a47bd8`（#279 対応済み）です。計測実験の adaptive-surface は含みません。ロールバック参照は配備中 `1d469e87efc154f76c97cb8cc21bbff851671ff2`（`dogfood/adaptive-surface-next`）です。
+> 3つのdogfood branchの役割は、[正準のbranch index](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)を参照してください。
+>
+> 基点は `tsukumijima/KonomiTV` master `cc9f340cde56f9e1343dc212600a78b607a47bd8`（#279対応済み）です。ロールバック参照は `1d469e87efc154f76c97cb8cc21bbff851671ff2`（`dogfood/adaptive-surface-next`）ですが、adaptive-surface自体はこのbranchの製品候補に含みません。
 
 このbranchで固定した主要componentは次のとおりです。
 
@@ -35,16 +37,16 @@ mpeg2toh264 dist（`cf6cecf` 側）の内容は次のとおりです。
 | --- | --- | --- |
 | KonomiTV `register-native-error-once@03143a5e` | 採用（`cc9f` へ意味的再適用） | 未merge。`cc9f` の `PlayerController` 変更と hunkが重ならず clean適用。HLS→Original連鎖の誤処理を直す |
 | KonomiTV `touch-center-controls@45d9a591` | 採用 | 未merge（親が `cc9f`）。`(hover: none)` + `(pointer: coarse)` の小規模CSSで安全 |
-| DPlayer `ignore-stale-video-events@8e49bb76` | 採用 | 未merge（親は上流 `v1.33.1`）。現行dogfoodで実績あり。今回も解決・build通過 |
+| DPlayer `ignore-stale-video-events@8e49bb76` | 採用 | 未merge（親は上流 `v1.33.1`）。このbranchではpinとdist再生成の対象とした。効果の評価は正確な来歴付き証拠による別途確認が必要 |
 | mpeg2toh264 `autofilm-comb-score-indexing@dcfe571`（`625eddc`） | 採用 | 未merge。`ivtc.ts` の索引化のみで他候補と重ならない |
-| mpeg2toh264 `preserve-complete-pictures-before-loss@c3406ab`（`60a380e`） | 採用 | 未merge。Session test 2件を含む Rust修正で、単体60件超と streaming 61件が通過 |
-| mpeg2toh264 `complete-exhausted-http-range-v2@d011466`（`9c0b1c7`） | 採用 | 未merge。`test-range-eof.mjs` 付きの 416終端修正で、iPad Original停止の回帰に対応 |
+| mpeg2toh264 `preserve-complete-pictures-before-loss@c3406ab`（`60a380e`） | 採用 | 未merge。Session test 2件を含む Rust修正（候補側の記録では単体60件超と streaming 61件通過とされるが、このcommitの証跡ではない） |
+| mpeg2toh264 `complete-exhausted-http-range-v2@d011466`（`9c0b1c7`） | 採用 | 未merge。`test-range-eof.mjs` 付きの 416終端修正（候補側の目的はiPad Original停止の回帰対応。このbranchでの再確認が必要） |
 | mpeg2toh264 `yadif-queue-fallback-removal@2bc48a0` | 除外 | 未mergeだが自体Readmeで改善・退行ともに未確定と明記。証拠が弱いため強制結合しない |
 | mpeg2toh264 `bit-exact-transcode-hot-paths@581f2b78` | 除外（別途分離検証） | 未merge。1000行超の hot-path書換えで dogfoodに載せるには分離した性能・同等性検証が要る |
 | mpeg2toh264 adaptive-surface `7e917a6` | 除外 | 計測実験であり製品候補ではない |
 | Starlette custom `17e3955` | 廃止（上流対応で代替） | 上流 `cc9f` の `DisconnectAwareFileResponse` が app層で同問題（#279）に対応。dogfood依存は公式 `1.6.0` に復元 |
 
-確認済みは、mpeg側の `cargo test -p mpeg2toh264 --test streaming` 61件通過（うち欠落保持2件を含む）、`test-range-eof` 通過、`test-ivtc`・`test-mse` 通過、mpeg側 `typecheck` 通過、KonomiTV側 `yarn lint`・`yarn typecheck`・`vite build` 通過です。DPlayer候補は配備中dogfoodの実績を引き継いでいます。加えて、両cache掃除後の Node 20.19.5 による `yarn install --frozen-lockfile` が成功し、導入された DPlayer dist が `8e49bb76` の blob と、mpeg2toh264 の dist・worker・`source.ts`・`worker.ts`・`deinterlace.ts` が `cf6cecf` と SHA-256 で一致すること、再buildの主要asset hashが表の値と一致することを確認しています。
+このcommitが証跡として示すのは、`client/package.json` のpin、`server/poetry.lock` の公式Starlette `1.6.0`、`client/dist` の再生成asset（表のSHA-256は追跡対象ファイルと一致）がこのbranchに含まれている範囲です。DPlayerの効果の来歴引継ぎは主張しません。以下の作業条件は過去の作業時点の記録であり、このcommitの証明ではありません。再現時は要再確認です：Node 20での両cache掃除（`yarn cache clean mpeg2toh264`・`yarn cache clean dplayer`）後の `yarn install --frozen-lockfile`、mpeg側のstreaming 61件（うち欠落保持2件を含む）・`test-range-eof`・`test-ivtc`・`test-mse`・`typecheck`、KonomiTV側の `yarn lint`・`yarn typecheck`・`vite build`、DPlayer distと `8e49bb76` blob・mpeg側dist等と `cf6cecf` のSHA-256照合。
 
 未確認は、iOSでの反復切替・現行HLS videoでの native error・ライブ待機中の画質切替、touch中央制御の実機タブレット確認、欠落TSからの復帰の browser・端末別確認、複数ストリーム同時変換の余力、EVO-X2再起動後の自動起動です。日常利用の観察は再現条件の探索に使い、固定条件の正式測定とは分けて扱います。
 
