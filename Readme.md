@@ -11,7 +11,7 @@
 | KonomiTV base | `cc9f340cde56f9e1343dc212600a78b607a47bd8` | 上流 master（`DisconnectAwareFileResponse` による切断後読出停止を含む） |
 | KonomiTV dogfood差分 | `86f05117` + `a17268bb` | touch中央制御と native error単一登録の意味的統合（暫定Readme警告は引き継がない） |
 | DPlayer | `libratechw/DPlayer#8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512` | 上流 `v1.33.1`（`a5f84787`）上の `codex/ignore-stale-video-events`（`a28ca25` + `3a263cb` + dist `8e49bb7`）。置換後videoの遅延eventと `play()` 失敗を現行videoに作用させない |
-| mpeg2toh264 | `libratechw/mpeg2toh264#cf6cecffa20be01eae94dd6238a557ca8eb60ae3`（未push。要先行push） | 上流 `konomi/main@faf1464` 上に `625eddc`（ivtc comb-score索引）+ `60a380e`（欠落前 complete pictures保持）+ `9c0b1c7`（exhausted range完成）を結合し dist再生成。`yadif-queue除去`・`perf hot-paths`・adaptive-surfaceは含まない |
+| mpeg2toh264 | `libratechw/mpeg2toh264#cf6cecffa20be01eae94dd6238a557ca8eb60ae3`（`dogfood/product-candidates` をpush済み） | 上流 `konomi/main@faf1464` 上に `625eddc`（ivtc comb-score索引）+ `60a380e`（欠落前 complete pictures保持）+ `9c0b1c7`（exhausted range完成）を結合し dist再生成。`yadif-queue除去`・`perf hot-paths`・adaptive-surfaceは含まない。再現手順は `yarn cache clean mpeg2toh264` と `yarn cache clean dplayer` の双方を実行してから、Node 20で `yarn install --frozen-lockfile` を行う（DPlayerは版が `1.33.1` のままのため片方の掃除だけでは古い取得が残りうる） |
 | Starlette | `1.6.0`（公式。custom git参照なし） | `server/pyproject.toml` と `server/poetry.lock` は上流状態。`17e3955` への依存解決はなし（`DisconnectAwareFileResponse.py` のコメント参照のみ。上流の app層対応が customを代替したため dogfoodでは廃止） |
 
 生成した主要client assetは次のとおりです。
@@ -44,7 +44,7 @@ mpeg2toh264 dist（`cf6cecf` 側）の内容は次のとおりです。
 | mpeg2toh264 adaptive-surface `7e917a6` | 除外 | 計測実験であり製品候補ではない |
 | Starlette custom `17e3955` | 廃止（上流対応で代替） | 上流 `cc9f` の `DisconnectAwareFileResponse` が app層で同問題（#279）に対応。dogfood依存は公式 `1.6.0` に復元 |
 
-確認済みは、mpeg側の `cargo test -p mpeg2toh264 --test streaming` 61件通過（うち欠落保持2件を含む）、`test-range-eof` 通過、`test-ivtc`・`test-mse` 通過、mpeg側 `typecheck` 通過、KonomiTV側 `yarn lint`・`yarn typecheck`・`vite build` 通過です。DPlayer候補は配備中dogfoodの実績を引き継いでいます。
+確認済みは、mpeg側の `cargo test -p mpeg2toh264 --test streaming` 61件通過（うち欠落保持2件を含む）、`test-range-eof` 通過、`test-ivtc`・`test-mse` 通過、mpeg側 `typecheck` 通過、KonomiTV側 `yarn lint`・`yarn typecheck`・`vite build` 通過です。DPlayer候補は配備中dogfoodの実績を引き継いでいます。加えて、両cache掃除後の Node 20.19.5 による `yarn install --frozen-lockfile` が成功し、導入された DPlayer dist が `8e49bb76` の blob と、mpeg2toh264 の dist・worker・`source.ts`・`worker.ts`・`deinterlace.ts` が `cf6cecf` と SHA-256 で一致すること、再buildの主要asset hashが表の値と一致することを確認しています。
 
 未確認は、iOSでの反復切替・現行HLS videoでの native error・ライブ待機中の画質切替、touch中央制御の実機タブレット確認、欠落TSからの復帰の browser・端末別確認、複数ストリーム同時変換の余力、EVO-X2再起動後の自動起動です。日常利用の観察は再現条件の探索に使い、固定条件の正式測定とは分けて扱います。
 
