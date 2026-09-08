@@ -1363,6 +1363,51 @@ class PlayerController {
             }
         });
 
+        // HTMLVideoElement ネイティブの再生時エラーのイベントハンドラーを登録
+        // 画質切り替えのたびに登録すると、以前の画質で登録したハンドラーが Original 再生中にも残り、
+        // mpeg2toh264 のエラーに伴う video のエラーを HLS のエラーとして誤処理してしまうため、DPlayer ごとに1回だけ登録する
+        this.player.on('error', async (event: Event) => {
+            const player = this.player;
+
+            // DPlayer がすでに破棄されている場合や、切り替え前の video から遅れて届いたイベントは何もしない
+            if (player === null || !(event.target instanceof HTMLVideoElement) || event.target !== player.video) {
+                return;
+            }
+
+            // mpeg2toh264 のエラーはプラグイン自身のエラー表示と停止処理に任せる
+            if (player.type === 'mpeg2toh264') {
+                return;
+            }
+
+            if (this.playback_mode === 'Live') {
+                // ライブ視聴では、Offline 中のエラーは通常の停止処理なので再起動しない
+                if (player_store.live_stream_status === 'Offline') {
+                    return;
+                }
+
+                // すぐ再起動すると問題があるケースがあるので、少し待機する
+                await Utils.sleep(1);
+
+                // 待機中にプレイヤーが破棄された場合や、別の video / Original へ切り替わった場合は何もしない
+                if (this.player !== player || player.video !== event.target || player.type === 'mpeg2toh264') {
+                    return;
+                }
+            }
+
+            if (player.video.error) {
+                console.error('\u001b[31m[PlayerController] HTMLVideoElement error event:', player.video.error);
+                player_store.event_emitter.emit('PlayerRestartRequired', {
+                    message: `再生中にエラーが発生しました。(Native: ${player.video.error.code}: ${player.video.error.message}) プレイヤーを再起動しています…`,
+                });
+            } else {
+                // MediaError オブジェクトは場合によっては存在しないことがあるらしい…
+                // 存在しない場合は unknown error として扱う
+                player_store.event_emitter.emit('PlayerRestartRequired', {
+                    message: '再生中にエラーが発生しました。(Native: unknown error) プレイヤーを再起動しています…',
+                });
+            }
+        });
+
         // 今回 (DPlayer 初期化直後) と画質切り替え開始時の両方のタイミングで実行する必要がある処理
         // mpegts.js などの DPlayer のプラグインは画質切り替え時に一旦破棄されるため、再度イベントハンドラーを登録する必要がある
         const on_init_or_quality_change = async () => {
@@ -1447,33 +1492,6 @@ class PlayerController {
                     player_store.event_emitter.emit('PlayerRestartRequired', {
                         message: `再生中にエラーが発生しました。(${error_type}: ${detail}) プレイヤーを再起動しています…`,
                     });
-                });
-
-                // HTMLVideoElement ネイティブの再生時エラーのイベントハンドラーを登録
-                // mpegts.js が予期せずクラッシュした場合など、意図せず発生してしまうことがある
-                // Offline 以外であれば PlayerController の再起動を要求する
-                this.player.on('error', async (event: MediaError) => {
-
-                    // DPlayer がすでに破棄されているか、現在ライブストリームが Offline であれば何もしない
-                    if (this.player === null || player_store.live_stream_status === 'Offline') {
-                        return;
-                    }
-
-                    // すぐ再起動すると問題があるケースがあるので、少し待機する
-                    await Utils.sleep(1);
-
-                    if (this.player.video.error) {
-                        console.error('\u001b[31m[PlayerController] HTMLVideoElement error event:', this.player.video.error);
-                        player_store.event_emitter.emit('PlayerRestartRequired', {
-                            message: `再生中にエラーが発生しました。(Native: ${this.player.video.error.code}: ${this.player.video.error.message}) プレイヤーを再起動しています…`,
-                        });
-                    } else {
-                        // MediaError オブジェクトは場合によっては存在しないことがあるらしい…
-                        // 存在しない場合は unknown error として扱う
-                        player_store.event_emitter.emit('PlayerRestartRequired', {
-                            message: '再生中にエラーが発生しました。(Native: unknown error) プレイヤーを再起動しています…',
-                        });
-                    }
                 });
 
                 // 必ず最初はローディング状態とする
@@ -1718,31 +1736,6 @@ class PlayerController {
                 };
                 this.player.video.oncanplay = on_canplay;
                 this.player.video.oncanplaythrough = on_canplay;
-
-                // HTMLVideoElement ネイティブの再生時エラーのイベントハンドラーを登録
-                // HLS 再生時にブラウザが呼び出す HW デコーダーがクラッシュした場合など、意図せず発生してしまうことがある
-                // プレイヤー自体の破棄・再生成以外では基本復旧できないので、PlayerController の再起動を要求する
-                if (this.player.type !== 'mpeg2toh264') this.player.on('error', async (event: MediaError) => {
-
-                    // DPlayer がすでに破棄されていれば何もしない
-                    if (this.player === null) {
-                        return;
-                    }
-
-                    // ライブ視聴時とは異なり、録画なので待たなくても再起動できる
-                    if (this.player.video.error) {
-                        console.error('\u001b[31m[PlayerController] HTMLVideoElement error event:', this.player.video.error);
-                        player_store.event_emitter.emit('PlayerRestartRequired', {
-                            message: `再生中にエラーが発生しました。(Native: ${this.player.video.error.code}: ${this.player.video.error.message}) プレイヤーを再起動しています…`,
-                        });
-                    } else {
-                        // MediaError オブジェクトは場合によっては存在しないことがあるらしい…
-                        // 存在しない場合は unknown error として扱う
-                        player_store.event_emitter.emit('PlayerRestartRequired', {
-                            message: '再生中にエラーが発生しました。(Native: unknown error) プレイヤーを再起動しています…',
-                        });
-                    }
-                });
 
                 // mpeg2toh264 の再生中になんらかの再生エラーが発生した場合は、エラー状態を明示するために自動で HLS 画質へ切り替わらないようにする
                 if (this.player.type === 'mpeg2toh264' && this.player.plugins.mpeg2toh264) {
