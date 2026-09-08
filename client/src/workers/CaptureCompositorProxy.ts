@@ -1,10 +1,13 @@
 
-import { ICaptureCompositorConstructor } from '@/workers/CaptureCompositor';
+import * as Comlink from 'comlink';
+
+import type { ICaptureCompositorConstructor } from '@/workers/CaptureCompositor';
 
 
 // CaptureCompositor を Web Worker 上で動作させるためのラッパー
-// Comlink を経由し、Web Worker とメインスレッド間でオブジェクトをやり取りする
-// ラップ元と同じファイルに定義すると Webpack から Circler Dependency として警告されブラウザの挙動が不安定になるため、別ファイルに定義している
-const CaptureCompositorProxy =
-    new ComlinkWorker<ICaptureCompositorConstructor>(new URL('./CaptureCompositor', import.meta.url));
+// CaptureCompositor 側がクラスを直接 expose するため、モジュールの exports を再度 expose する
+// ComlinkWorker は使わず、通常の Worker を wrap して静的メソッドとコンストラクターを公開する
+const CaptureCompositorProxy = Comlink.wrap<ICaptureCompositorConstructor>(
+    new Worker(new URL('./CaptureCompositor.ts', import.meta.url), {type: 'module'}),
+);
 export default CaptureCompositorProxy;
