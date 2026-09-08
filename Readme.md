@@ -1,8 +1,10 @@
 
 > [!WARNING]
-> **このbranchは、KonomiTVを日常利用しながら複数componentの変更を統合検証するdogfood版です。branch全体をupstreamへ取り込むことは想定していません。**
+> **`dogfood/adaptive-surface-next`は、適応型surface更新の比較測定とロールバック参照を目的とする実験branchです。branch全体や実験を製品候補として採用しません。**
 >
-> **配備状態：2026年9月7日からEVO-X2の専用環境へ試験配備中。** 録画Original、ライブOriginal、Original→720p→Originalの画質往復をsmoke testします。VCEEncCは実ライブで終了するため、配備設定ではFFmpegを使います。
+> 3つのdogfood branchの役割は、[公開調査のbranch index](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)を参照してください。
+
+このbranchでは、録画Original、ライブOriginal、Original→720p→Originalの画質往復をsmoke testの対象とします。VCEEncCは実ライブで終了するため、確認時はFFmpegを使用します。
 
 このbranchはKonomiTV `5167612f1570c53c8dc7132a5792524244193d6f`を基点に、次の変更を固定しています。
 
