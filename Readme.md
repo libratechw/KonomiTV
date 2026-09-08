@@ -1,8 +1,10 @@
 
 > [!WARNING]
-> **このbranchは、KonomiTVを日常利用しながら複数componentの変更を統合検証するdogfood版です。branch全体をupstreamへ取り込むことは想定していません。**
+> **`dogfood/integration`は、最初の統合dogfood版を固定した履歴参照branchです。branch全体をupstreamへ取り込むことは想定していません。**
 >
-> **配備状態：EVO-X2の専用環境へ試験配備中。** 録画Original、ライブのOriginal→720p→Original往復、異常終了後の自動復帰を確認しています。VCEEncCは実ライブで終了するため、配備設定ではFFmpegを使います。720pの実機試験では1280×720で再生が進み、`docker stats`のCPU使用率は56.20〜59.70%でした。EVO-X2再起動後の自動起動と、複数ストリームを同時に変換する場合の余力は未確認です。
+> 3つのdogfood branchの役割は、[公開調査のbranch index](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)を参照してください。
+
+このbranchのdogfood確認では、録画Original、ライブのOriginal→720p→Original往復、異常終了後の自動復帰を確認しました。VCEEncCは実ライブで終了したため、確認環境ではFFmpegを使用しました。720pの実機試験では1280×720で再生が進み、`docker stats`のCPU使用率は56.20〜59.70%でした。EVO-X2再起動後の自動起動と、複数ストリームを同時に変換する場合の余力は未確認です。
 
 このbranchはKonomiTV `ea1962f84c22265c1d31081dfe41cc3b53e9a555`を基点に、次の変更を固定しています。
 
