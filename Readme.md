@@ -1,4 +1,53 @@
 
+> [!WARNING]
+> **このbranchは、複数componentの製品候補変更を日常利用で統合検証するdogfood版です。branch全体をupstreamへ取り込むことは想定していません。**
+>
+> 基点は `tsukumijima/KonomiTV` master `cc9f340cde56f9e1343dc212600a78b607a47bd8`（#279 対応済み）です。計測実験の adaptive-surface は含みません。ロールバック参照は配備中 `1d469e87efc154f76c97cb8cc21bbff851671ff2`（`dogfood/adaptive-surface-next`）です。
+
+このbranchで固定した主要componentは次のとおりです。
+
+| component | revision | 内容 |
+| --- | --- | --- |
+| KonomiTV base | `cc9f340cde56f9e1343dc212600a78b607a47bd8` | 上流 master（`DisconnectAwareFileResponse` による切断後読出停止を含む） |
+| KonomiTV dogfood差分 | `86f05117` + `a17268bb` | touch中央制御と native error単一登録の意味的統合（暫定Readme警告は引き継がない） |
+| DPlayer | `libratechw/DPlayer#8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512` | 上流 `v1.33.1`（`a5f84787`）上の `codex/ignore-stale-video-events`（`a28ca25` + `3a263cb` + dist `8e49bb7`）。置換後videoの遅延eventと `play()` 失敗を現行videoに作用させない |
+| mpeg2toh264 | `libratechw/mpeg2toh264#cf6cecffa20be01eae94dd6238a557ca8eb60ae3`（未push。要先行push） | 上流 `konomi/main@faf1464` 上に `625eddc`（ivtc comb-score索引）+ `60a380e`（欠落前 complete pictures保持）+ `9c0b1c7`（exhausted range完成）を結合し dist再生成。`yadif-queue除去`・`perf hot-paths`・adaptive-surfaceは含まない |
+| Starlette | `1.6.0`（公式。custom git参照なし） | `server/pyproject.toml` と `server/poetry.lock` は上流状態。`17e3955` への依存解決はなし（`DisconnectAwareFileResponse.py` のコメント参照のみ。上流の app層対応が customを代替したため dogfoodでは廃止） |
+
+生成した主要client assetは次のとおりです。
+
+| asset | SHA-256 |
+| --- | --- |
+| `PlayerController-BaTDMfc-.js` | `4f8f580a106f49d8b5bed5df4148a8cef27237978e3ba6b6f6801cd7fd96c72b` |
+| `worker-CHHR8w0w.BVJouBXt.js` | `ac9b1e0fab4bb732957bbfdc2fb5e9f4ff3e3d654d72decdb930a2f8091e09ff` |
+| `worker-D253sse2.DmYmaOz9.js` | `ca72bd87b470abb4b011334d700fea963bbb8909199f031bf9b4e60475450264` |
+
+mpeg2toh264 dist（`cf6cecf` 側）の内容は次のとおりです。
+
+| file | SHA-256 |
+| --- | --- |
+| `packages/player/dist/index.js` | `dce77b913645fe8a8b4c66592b33d532da6b8f3999fc3890b9f818b262bb7d97` |
+| `packages/yadif/dist/index.js` | `c5682a41f8d4e635a0605ab094b5eead409c5c156f17d4649599243b7b647fa9` |
+
+候補の判定は次のとおりです。
+
+| candidate | 判定 | 理由 |
+| --- | --- | --- |
+| KonomiTV `register-native-error-once@03143a5e` | 採用（`cc9f` へ意味的再適用） | 未merge。`cc9f` の `PlayerController` 変更と hunkが重ならず clean適用。HLS→Original連鎖の誤処理を直す |
+| KonomiTV `touch-center-controls@45d9a591` | 採用 | 未merge（親が `cc9f`）。`(hover: none)` + `(pointer: coarse)` の小規模CSSで安全 |
+| DPlayer `ignore-stale-video-events@8e49bb76` | 採用 | 未merge（親は上流 `v1.33.1`）。現行dogfoodで実績あり。今回も解決・build通過 |
+| mpeg2toh264 `autofilm-comb-score-indexing@dcfe571`（`625eddc`） | 採用 | 未merge。`ivtc.ts` の索引化のみで他候補と重ならない |
+| mpeg2toh264 `preserve-complete-pictures-before-loss@c3406ab`（`60a380e`） | 採用 | 未merge。Session test 2件を含む Rust修正で、単体60件超と streaming 61件が通過 |
+| mpeg2toh264 `complete-exhausted-http-range-v2@d011466`（`9c0b1c7`） | 採用 | 未merge。`test-range-eof.mjs` 付きの 416終端修正で、iPad Original停止の回帰に対応 |
+| mpeg2toh264 `yadif-queue-fallback-removal@2bc48a0` | 除外 | 未mergeだが自体Readmeで改善・退行ともに未確定と明記。証拠が弱いため強制結合しない |
+| mpeg2toh264 `bit-exact-transcode-hot-paths@581f2b78` | 除外（別途分離検証） | 未merge。1000行超の hot-path書換えで dogfoodに載せるには分離した性能・同等性検証が要る |
+| mpeg2toh264 adaptive-surface `7e917a6` | 除外 | 計測実験であり製品候補ではない |
+| Starlette custom `17e3955` | 廃止（上流対応で代替） | 上流 `cc9f` の `DisconnectAwareFileResponse` が app層で同問題（#279）に対応。dogfood依存は公式 `1.6.0` に復元 |
+
+確認済みは、mpeg側の `cargo test -p mpeg2toh264 --test streaming` 61件通過（うち欠落保持2件を含む）、`test-range-eof` 通過、`test-ivtc`・`test-mse` 通過、mpeg側 `typecheck` 通過、KonomiTV側 `yarn lint`・`yarn typecheck`・`vite build` 通過です。DPlayer候補は配備中dogfoodの実績を引き継いでいます。
+
+未確認は、iOSでの反復切替・現行HLS videoでの native error・ライブ待機中の画質切替、touch中央制御の実機タブレット確認、欠落TSからの復帰の browser・端末別確認、複数ストリーム同時変換の余力、EVO-X2再起動後の自動起動です。日常利用の観察は再現条件の探索に使い、固定条件の正式測定とは分けて扱います。
+
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
 <img width="100%" src="https://github.com/user-attachments/assets/6971f354-0418-4305-bf6d-b061142ffec6">
