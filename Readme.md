@@ -1,4 +1,9 @@
 
+> [!WARNING]
+> **このbranch (`provisional/livepsi-worker-single-expose`) は、LivePSI worker Comlink単一公開の暫定の取込み候補です。検証が残っています。**
+>
+> code baseは `cc9f340cde56f9e1343dc212600a78b607a47bd8`、実装は `49f391b4b34a684d5538e032969a9478b0133b84`、このcommitは文書追加のみです。型/lint/buildとconstructor probeは実装時点の過去確認であり、今回は再実行していません。live視聴・PSI/SI・データ放送・画質切替・長時間worker lifecycleは未検証です。
+
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
 <img width="100%" src="https://github.com/user-attachments/assets/6971f354-0418-4305-bf6d-b061142ffec6">
