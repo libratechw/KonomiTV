@@ -9,10 +9,10 @@
 | --- | --- | --- |
 | KonomiTV | このbranchのsourceと追跡済みclient/dist | touch端末の中央操作、native error単一登録、Capture/LivePSI Worker単一公開を保持 |
 | DPlayer | [8e49bb7](https://github.com/libratechw/DPlayer/commit/8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512) | 置換済みvideoから届く遅延eventを現行videoへ作用させない |
-| mpeg2toh264 | [38404ed](https://github.com/libratechw/mpeg2toh264/commit/38404ed0d5616cd3cc953155a595b2e06a3debe0) | 既存のIVTC索引化・完全picture保持・HTTP Range終端処理に、ビット一致hot-path 5件とadaptive surface `3f75bd0` を統合 |
+| mpeg2toh264 | [1e0eb60](https://github.com/libratechw/mpeg2toh264/commit/1e0eb60841daeacb1deae3def0192cf53512638e) | 既存のIVTC索引化・完全picture保持・HTTP Range終端処理に、ビット一致hot-path 5件とadaptive surfaceを統合。試行期限と中断処理はsource `2f5ea1e`まで反映 |
 | Starlette | 公式 `1.6.0` | 上流の切断処理を使用。custom forkへの依存はない |
 
-adaptive surfaceは通常Playerのtimelineから判定し、シーク中を除いた持続的な約30Hzへの低下時に1×1 CSS pixelを更新します。POCOの正常録画で発動後に約60fpsへ戻ることを観測済みです。自然回復との厳密な因果、電力・発熱、他端末への影響は未確認で、回復済みsurfaceが同じsessionのシーク間で維持される挙動も日常利用で評価します。
+adaptive surfaceは通常Playerのtimelineから判定し、シーク中を除いた持続的な約30Hzへの低下時に1×1 CSS pixelを更新します。POCOの正常録画では旧source `3f75bd0`で発動後に約60fpsへ戻ることを観測済みです。今回の試行期限・中断処理の修正は自動試験で確認しており、元の30Hz化の原因修正ではありません。自然回復との厳密な因果、電力・発熱、他端末への影響は未確認で、回復済みsurfaceが同じsessionのシーク間で維持される挙動も日常利用で評価します。
 
 S1の出力変更、未確認のqueue fallback撤去、診断専用のトレース・UIは含めません。既存のiOS Original停止や字幕の表示問題が解決したとは扱いません。録画参照先は既存の読み取り専用mountを維持します。
 
