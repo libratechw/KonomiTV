@@ -1,54 +1,26 @@
+> [!NOTE]
+> `dogfood/integration` は日常利用用の唯一の統合branchです。実験を含み、branch全体を上流へ取り込む対象ではありません。旧 `dogfood/product-candidates` と `dogfood/adaptive-surface-next` は固定tagへ保存して役割を終了します。
 
-> [!WARNING]
-> **`dogfood/product-candidates`は、新しい上流から作り直した製品候補branchです。個別commit単位の評価・取込み用であり、branch全体のupstream取込みは想定していません。計測実験のadaptive-surfaceと不要なcustom Starletteは含みません。**
->
-> 3つのdogfood branchの役割は、[正準のbranch index](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)を参照してください。
->
-> 基点は `tsukumijima/KonomiTV` master `cc9f340cde56f9e1343dc212600a78b607a47bd8`（#279対応済み）です。ロールバック参照は `1d469e87efc154f76c97cb8cc21bbff851671ff2`（`dogfood/adaptive-surface-next`）ですが、adaptive-surface自体はこのbranchの製品候補に含みません。
+## 配備構成と評価対象
 
-このbranchで固定した主要componentは次のとおりです。
+既存dogfood `5d60f726` の機能を保持し、mpeg2toh264のビット一致最適化とadaptive surfaceを追加しています。上流確認時点は2026-09-09、KonomiTV `ea1962f`、mpeg2toh264 `faf1464`、DPlayer `a5f8478` です。実配備の確認結果は[調査一覧](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)へ記録します。
 
-| component | revision | 内容 |
+| component | 固定commit・版 | 日常利用で確認する変更 |
 | --- | --- | --- |
-| KonomiTV base | `cc9f340cde56f9e1343dc212600a78b607a47bd8` | 上流 master（`DisconnectAwareFileResponse` による切断後読出停止を含む） |
-| KonomiTV dogfood差分 | `86f05117` + `a17268bb` | touch中央制御と native error単一登録の意味的統合（暫定Readme警告は引き継がない） |
-| DPlayer | `libratechw/DPlayer#8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512` | 上流 `v1.33.1`（`a5f84787`）上の `codex/ignore-stale-video-events`（`a28ca25` + `3a263cb` + dist `8e49bb7`）。置換後videoの遅延eventと `play()` 失敗を現行videoに作用させない |
-| mpeg2toh264 | `libratechw/mpeg2toh264#cf6cecffa20be01eae94dd6238a557ca8eb60ae3`（`dogfood/product-candidates` をpush済み） | 上流 `konomi/main@faf1464` 上に `625eddc`（ivtc comb-score索引）+ `60a380e`（欠落前 complete pictures保持）+ `9c0b1c7`（exhausted range完成）を結合し dist再生成。`yadif-queue除去`・`perf hot-paths`・adaptive-surfaceは含まない。再現手順は `yarn cache clean mpeg2toh264` と `yarn cache clean dplayer` の双方を実行してから、Node 20で `yarn install --frozen-lockfile` を行う（DPlayerは版が `1.33.1` のままのため片方の掃除だけでは古い取得が残りうる） |
-| Starlette | `1.6.0`（公式。custom git参照なし） | `server/pyproject.toml` と `server/poetry.lock` は上流状態。`17e3955` への依存解決はなし（`DisconnectAwareFileResponse.py` のコメント参照のみ。上流の app層対応が customを代替したため dogfoodでは廃止） |
+| KonomiTV | このbranchのsourceと追跡済みclient/dist | touch端末の中央操作、native error単一登録、Capture/LivePSI Worker単一公開を保持 |
+| DPlayer | [8e49bb7](https://github.com/libratechw/DPlayer/commit/8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512) | 置換済みvideoから届く遅延eventを現行videoへ作用させない |
+| mpeg2toh264 | [38404ed](https://github.com/libratechw/mpeg2toh264/commit/38404ed0d5616cd3cc953155a595b2e06a3debe0) | 既存のIVTC索引化・完全picture保持・HTTP Range終端処理に、ビット一致hot-path 5件とadaptive surface `3f75bd0` を統合 |
+| Starlette | 公式 `1.6.0` | 上流の切断処理を使用。custom forkへの依存はない |
 
-生成した主要client assetは次のとおりです。
+adaptive surfaceは通常Playerのtimelineから判定し、シーク中を除いた持続的な約30Hzへの低下時に1×1 CSS pixelを更新します。POCOの正常録画で発動後に約60fpsへ戻ることを観測済みです。自然回復との厳密な因果、電力・発熱、他端末への影響は未確認で、回復済みsurfaceが同じsessionのシーク間で維持される挙動も日常利用で評価します。
 
-| asset | SHA-256 |
-| --- | --- |
-| `PlayerController-BaTDMfc-.js` | `4f8f580a106f49d8b5bed5df4148a8cef27237978e3ba6b6f6801cd7fd96c72b` |
-| `worker-CHHR8w0w.BVJouBXt.js` | `ac9b1e0fab4bb732957bbfdc2fb5e9f4ff3e3d654d72decdb930a2f8091e09ff` |
-| `worker-D253sse2.DmYmaOz9.js` | `ca72bd87b470abb4b011334d700fea963bbb8909199f031bf9b4e60475450264` |
+S1の出力変更、未確認のqueue fallback撤去、診断専用のトレース・UIは含めません。既存のiOS Original停止や字幕の表示問題が解決したとは扱いません。録画参照先は既存の読み取り専用mountを維持します。
 
-mpeg2toh264 dist（`cf6cecf` 側）の内容は次のとおりです。
+## 再構築と確認
 
-| file | SHA-256 |
-| --- | --- |
-| `packages/player/dist/index.js` | `dce77b913645fe8a8b4c66592b33d532da6b8f3999fc3890b9f818b262bb7d97` |
-| `packages/yadif/dist/index.js` | `c5682a41f8d4e635a0605ab094b5eead409c5c156f17d4649599243b7b647fa9` |
+Node.js 20.19.5、Yarn 1.22.22を使用します。`client/` で `yarn cache clean mpeg2toh264` と `yarn cache clean dplayer` の後、`yarn install --frozen-lockfile`、`yarn lint`、`yarn typecheck`、`yarn build` を実行します。依存pinと実際のpackage distを照合し、生成した `client/dist` はsourceと別commitで保存します。
 
-候補の判定は次のとおりです。
-
-| candidate | 判定 | 理由 |
-| --- | --- | --- |
-| KonomiTV `register-native-error-once@03143a5e` | 採用（`cc9f` へ意味的再適用） | 未merge。`cc9f` の `PlayerController` 変更と hunkが重ならず clean適用。HLS→Original連鎖の誤処理を直す |
-| KonomiTV `touch-center-controls@45d9a591` | 採用 | 未merge（親が `cc9f`）。`(hover: none)` + `(pointer: coarse)` の小規模CSSで安全 |
-| DPlayer `ignore-stale-video-events@8e49bb76` | 採用 | 未merge（親は上流 `v1.33.1`）。このbranchではpinとdist再生成の対象とした。効果の評価は正確な来歴付き証拠による別途確認が必要 |
-| mpeg2toh264 `autofilm-comb-score-indexing@dcfe571`（`625eddc`） | 採用 | 未merge。`ivtc.ts` の索引化のみで他候補と重ならない |
-| mpeg2toh264 `preserve-complete-pictures-before-loss@c3406ab`（`60a380e`） | 採用 | 未merge。Session test 2件を含む Rust修正（候補側の記録では単体60件超と streaming 61件通過とされるが、このcommitの証跡ではない） |
-| mpeg2toh264 `complete-exhausted-http-range-v2@d011466`（`9c0b1c7`） | 採用 | 未merge。`test-range-eof.mjs` 付きの 416終端修正（候補側の目的はiPad Original停止の回帰対応。このbranchでの再確認が必要） |
-| mpeg2toh264 `yadif-queue-fallback-removal@2bc48a0` | 除外 | 未mergeだが自体Readmeで改善・退行ともに未確定と明記。証拠が弱いため強制結合しない |
-| mpeg2toh264 `bit-exact-transcode-hot-paths@581f2b78` | 除外（別途分離検証） | 未merge。1000行超の hot-path書換えで dogfoodに載せるには分離した性能・同等性検証が要る |
-| mpeg2toh264 adaptive-surface `7e917a6` | 除外 | 計測実験であり製品候補ではない |
-| Starlette custom `17e3955` | 廃止（上流対応で代替） | 上流 `cc9f` の `DisconnectAwareFileResponse` が app層で同問題（#279）に対応。dogfood依存は公式 `1.6.0` に復元 |
-
-このcommitが証跡として示すのは、`client/package.json` のpin、`server/poetry.lock` の公式Starlette `1.6.0`、`client/dist` の再生成asset（表のSHA-256は追跡対象ファイルと一致）がこのbranchに含まれている範囲です。DPlayerの効果の来歴引継ぎは主張しません。以下の作業条件は過去の作業時点の記録であり、このcommitの証明ではありません。再現時は要再確認です：Node 20での両cache掃除（`yarn cache clean mpeg2toh264`・`yarn cache clean dplayer`）後の `yarn install --frozen-lockfile`、mpeg側のstreaming 61件（うち欠落保持2件を含む）・`test-range-eof`・`test-ivtc`・`test-mse`・`typecheck`、KonomiTV側の `yarn lint`・`yarn typecheck`・`vite build`、DPlayer distと `8e49bb76` blob・mpeg側dist等と `cf6cecf` のSHA-256照合。
-
-未確認は、iOSでの反復切替・現行HLS videoでの native error・ライブ待機中の画質切替、touch中央制御の実機タブレット確認、欠落TSからの復帰の browser・端末別確認、複数ストリーム同時変換の余力、EVO-X2再起動後の自動起動です。日常利用の観察は再現条件の探索に使い、固定条件の正式測定とは分けて扱います。
+統合mpeg2toh264ではRust release tests、WASM build、型検査、IVTC・MSE・HTTP Range終端・adaptive surfaceテストとpackage buildが成功しています。KonomiTVのlint、型検査、client buildも成功しています。短時間確認と2〜4週間の日常利用を分け、ユーザー目線の明確な改善と関連回帰なしの確認が揃うまでPR候補へ昇格しません。
 
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
