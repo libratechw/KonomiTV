@@ -3,7 +3,7 @@
 
 ## 配備構成と評価対象
 
-既存dogfood `5d60f726` の機能を保持し、mpeg2toh264のビット一致最適化とadaptive surfaceを追加しています。上流確認時点は2026-09-09、KonomiTV `ea1962f`、mpeg2toh264 `faf1464`、DPlayer `a5f8478` です。実配備の確認結果は[調査一覧](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)へ記録します。
+既存dogfood `5d60f726` の機能を保持し、mpeg2toh264のビット一致最適化とadaptive surfaceを追加しています。上流確認時点は2026-09-09、KonomiTV `13649f3`（Capture修正のPR #282を取り込み済み）、mpeg2toh264 `faf1464`、DPlayer `a5f8478` です。実配備の確認結果は[調査一覧](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)へ記録します。
 
 | component | 固定commit・版 | 日常利用で確認する変更 |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ S1の出力変更、未確認のqueue fallback撤去、診断専用のトレー�
 
 Node.js 20.19.5、Yarn 1.22.22を使用します。`client/` で `yarn cache clean mpeg2toh264` と `yarn cache clean dplayer` の後、`yarn install --frozen-lockfile`、`yarn lint`、`yarn typecheck`、`yarn build` を実行します。依存pinと実際のpackage distを照合し、生成した `client/dist` はsourceと別commitで保存します。
 
-統合mpeg2toh264ではRust release tests、WASM build、型検査、IVTC・MSE・HTTP Range終端・adaptive surfaceテストとpackage buildが成功しています。KonomiTVのlint、型検査、client buildも成功しています。短時間確認と2〜4週間の日常利用を分け、ユーザー目線の明確な改善と関連回帰なしの確認が揃うまでPR候補へ昇格しません。
+統合mpeg2toh264ではRust release tests、WASM build、型検査、IVTC・MSE・HTTP Range終端・adaptive surfaceテストとpackage buildが成功しています。KonomiTVのlint、型検査、client buildも成功しています。PR候補は変更の価値と影響に応じた証拠で判断します。明確な局所バグは長期利用を一律に要求せず、今回の描画・電力・発熱などの長期影響は2〜4週間ほどの日常利用を目安に確認します。
 
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
