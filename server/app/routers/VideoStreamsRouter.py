@@ -110,14 +110,15 @@ async def VideoHLSPlaylistAPI(
 
     # 映像・主音声と副音声は同じエンコード結果を共有し、プレイリストの種類だけをこの API で切り替える
     if playlist_type == 'master':
-        # MPEG-TS の多重化オーバーヘッドを10%見込み、最大映像と2本分の音声を収容できる帯域幅を宣言する
+        # MPEG-TS の多重化オーバーヘッドを10%見込み、最大映像と同時取得される3本分の音声を収容できる帯域幅を宣言する
+        ## 主音声用セグメント内の2本に加え、副音声選択時は副音声専用セグメントも同時に取得される
         quality = QUALITY[stream_quality.quality]
         video_bitrate = int(quality.video_bitrate_max.removesuffix('K')) * 1000
         audio_bitrate = int(quality.audio_bitrate.removesuffix('K')) * 1000
-        bandwidth = round((video_bitrate + audio_bitrate * 2) * 1.1)
+        bandwidth = round((video_bitrate + audio_bitrate * 3) * 1.1)
         playlist_uri = f'playlist?session_id={session_id}'
 
-        # tsreadex は副音声のない区間も無音 AAC で補完するため、番組情報に関係なく常に2本の音声トラックを公開する
+        # tsreadex は副音声のない区間を主音声のコピーで補完するため、番組情報に関係なく常に2本の音声トラックを公開する
         ## 編成の途中から副音声が始まる場合も、利用者の選択を維持したまま再生できる
         playlist = '#EXTM3U\n#EXT-X-VERSION:6\n'
         playlist += '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="主音声",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="jpn"\n'
