@@ -126,10 +126,9 @@ class PlayerController {
     // 破棄済みかどうか
     private destroyed = false;
 
-    // ライブ再生開始時の一時ミュートを、保存済みミュートと区別するフラグ
-    // 一時ミュートで発火した volumechange を、ユーザー操作として保存しないために使う
-    private is_live_startup_temporary_muted = false;
-
+    // ライブ再生開始時の一時ミュートを適用している HTMLVideoElement
+    // この映像の一時ミュートで発火した volumechange だけを、ユーザー操作として保存しないために使う
+    private live_startup_temporary_mute_owner: HTMLVideoElement | null = null;
 
     /**
      * コンストラクタ
@@ -248,7 +247,7 @@ class PlayerController {
 
         // 破棄済みかどうかのフラグを下ろす
         this.destroyed = false;
-        this.is_live_startup_temporary_muted = false;
+        this.live_startup_temporary_mute_owner = null;
         this.is_offline_fallback_in_progress = false;
 
         // PlayerStore にプレイヤーを初期化したことを通知する
@@ -942,7 +941,7 @@ class PlayerController {
         // スマホ向け UI ではミュートを解除する音量ボタンが表示されないため、PC 向け UI の状態だけを保存する
         this.player.on('volumechange', () => {
             if (this.player === null || this.player.container.classList.contains('dplayer-mobile') === true) return;
-            if (this.is_live_startup_temporary_muted === true) return;
+            if (this.live_startup_temporary_mute_owner === this.player.video) return;
             localStorage.setItem('dplayer-is-muted', this.player.video.muted ? 'true' : 'false');
         });
 
@@ -1244,45 +1243,62 @@ class PlayerController {
     private async recoverPlayback(): Promise<void> {
         assert(this.player !== null);
         const player_store = usePlayerStore();
+        const target_player = this.player;
+        const target_video = target_player.video;
+        const is_current_playback = () => this.destroying === false && this.destroyed === false &&
+            this.player === target_player && target_player.video === target_video;
 
         // 1 秒待つ
         await Utils.sleep(1);
 
-        // この時点で映像が停止していて、かつ readyState が HAVE_FUTURE_DATA な場合、復旧を試みる
-        // Safari ではタイミングによっては this.player.video が null になる場合があるらしいので ? を付ける
-        if (player_store.is_video_buffering === true && this.player?.video?.readyState < 3) {
+        // 待機中に画質切り替えなどで再生対象が変わった場合、古い映像向けの復旧処理を新しい映像に適用しない
+        if (is_current_playback() === false) return;
+
+        // この時点で映像が停止していて、かつ readyState が HAVE_FUTURE_DATA 未満の場合、復旧を試みる
+        if (player_store.is_video_buffering === true && target_video.readyState < 3) {
             console.warn('\u001b[31m[PlayerController] Video still buffering. (HTMLVideoElement.readyState < HAVE_FUTURE_DATA) Trying to recover.');
 
             // 一旦停止して、0.25 秒間を置く
-            this.player.video.pause();
+            target_video.pause();
             await Utils.sleep(0.25);
+
+            // 待機中に再生対象が変わっていれば、以降の再生操作を行わない
+            if (is_current_playback() === false) return;
 
             // 再度再生を試みる
             try {
-                await this.player.video.play();
+                await target_video.play();
             } catch (error) {
-                assert(this.player !== null);
+                // play() の完了前に再生対象が変わった場合、現在のプレイヤーを停止しない
+                if (is_current_playback() === false) return;
                 console.warn('\u001b[31m[PlayerController] HTMLVideoElement.play() rejected. paused.');
-                this.player.pause();
+                target_player.pause();
                 return;  // 再生開始がリジェクトされた場合はここで終了
             }
 
             // さらに 0.5 秒待った時点で映像が停止している場合、復旧を試みる
             await Utils.sleep(0.5);
-            if (player_store.is_video_buffering === true && this.player?.video?.readyState < 3) {
+
+            // 待機中に再生対象が変わっていれば、2 回目の復旧処理を行わない
+            if (is_current_playback() === false) return;
+            if (player_store.is_video_buffering === true && target_video.readyState < 3) {
                 console.warn('\u001b[31m[PlayerController] Video still buffering. (HTMLVideoElement.readyState < HAVE_FUTURE_DATA) Trying to recover.');
 
                 // 一旦停止して、0.25 秒間を置く
-                this.player.video.pause();
+                target_video.pause();
                 await Utils.sleep(0.25);
+
+                // 待機中に再生対象が変わっていれば、以降の再生操作を行わない
+                if (is_current_playback() === false) return;
 
                 // 再度再生を試みる
                 try {
-                    await this.player.video.play();
+                    await target_video.play();
                 } catch (error) {
-                    assert(this.player !== null);
+                    // play() の完了前に再生対象が変わった場合、現在のプレイヤーを停止しない
+                    if (is_current_playback() === false) return;
                     console.warn('\u001b[31m[PlayerController] (retry) HTMLVideoElement.play() rejected. paused.');
-                    this.player.pause();
+                    target_player.pause();
                 }
             }
         }
@@ -1413,6 +1429,16 @@ class PlayerController {
         // mpegts.js などの DPlayer のプラグインは画質切り替え時に一旦破棄されるため、再度イベントハンドラーを登録する必要がある
         const on_init_or_quality_change = async () => {
             assert(this.player !== null);
+            const target_player = this.player;
+            const target_video = target_player.video;
+            // DPlayer が画質切り替え時に生成した新しい video へ、以前の video の非同期処理を作用させない
+            const is_current_playback = () => this.destroying === false && this.destroyed === false &&
+                this.player === target_player && target_player.video === target_video;
+
+            // 画質切り替え前の映像が所有していた一時ミュート状態を、現在の映像へ持ち越さない
+            if (this.live_startup_temporary_mute_owner !== target_video) {
+                this.live_startup_temporary_mute_owner = null;
+            }
 
             // ローディング中の背景写真をランダムに変更
             player_store.background_url = PlayerUtils.generatePlayerBackgroundURL();
@@ -1429,39 +1455,42 @@ class PlayerController {
             if (this.playback_mode === 'Live') {
 
                 // mpeg2toh264 によるオリジナル画質再生時のみの専用処理
-                if (this.player.type === 'mpeg2toh264' && this.player.plugins.mpeg2toh264) {
+                if (target_player.type === 'mpeg2toh264' && target_player.plugins.mpeg2toh264) {
                     player_store.is_loading = true;
                     player_store.is_background_display = true;
 
                     // 最初の映像が再生可能になった時点で背景と待機表示を解除する
                     let on_canplay_called = false;
-                    const mpeg2toh264_player = this.player.plugins.mpeg2toh264;
+                    const mpeg2toh264_player = target_player.plugins.mpeg2toh264;
                     const startup_timeout_id = window.setTimeout(() => {
-                        if (this.destroyed === true || this.player?.plugins.mpeg2toh264 !== mpeg2toh264_player ||
+                        if (is_current_playback() === false || target_player.plugins.mpeg2toh264 !== mpeg2toh264_player ||
                             on_canplay_called === true) return;
                         player_store.event_emitter.emit('PlayerRestartRequired', {
                             message: '再生開始までに時間が掛かっています。プレイヤーを再起動しています…',
                         });
                     }, 15 * 1000);  // 15 秒でタイムアウト
                     const on_canplay = () => {
-                        if (this.player === null || on_canplay_called === true) return;
+                        if (is_current_playback() === false || on_canplay_called === true) {
+                            window.clearTimeout(startup_timeout_id);
+                            return;
+                        }
                         on_canplay_called = true;
                         window.clearTimeout(startup_timeout_id);
-                        this.player.video.oncanplay = null;
-                        this.player.video.oncanplaythrough = null;
+                        if (target_video.oncanplay === on_canplay) target_video.oncanplay = null;
+                        if (target_video.oncanplaythrough === on_canplay) target_video.oncanplaythrough = null;
                         player_store.is_loading = false;
                         player_store.is_video_buffering = false;
                         player_store.is_background_display = false;
                     };
-                    this.player.video.oncanplay = on_canplay;
-                    this.player.video.oncanplaythrough = on_canplay;
+                    target_video.oncanplay = on_canplay;
+                    target_video.oncanplaythrough = on_canplay;
 
                     // 変換処理が失敗した場合は DPlayer のエラー表示を残し、プレイヤーを停止状態にする
                     mpeg2toh264_player.addEventListener('error', () => {
                         window.clearTimeout(startup_timeout_id);
-                        this.player?.pause();
+                        if (is_current_playback() === true) target_player.pause();
                     }, {once: true});
-                    this.player.play();
+                    target_player.play();
 
                     // オリジナル画質では mpeg2toh264 自身がバッファを適切に管理してくれるため、mpegts.js 専用の同期処理はスキップする
                     return;
@@ -1471,21 +1500,21 @@ class PlayerController {
                 // 再生中に mpegts.js 内部でエラーが発生した際 (例: デバイスの通信が一時的に切断され、API からのストリーミングが途切れた際) に呼び出される
                 // このエラーハンドラーでエラーをキャッチして、PlayerController の再起動を要求する
                 // PlayerController 内部なので直接再起動してもいいのだが、PlayerController を再起動させる処理は共通化しておきたい
-                this.player.plugins.mpegts?.on(mpegts.Events.ERROR, async (error_type: string, detail: string) => {
+                target_player.plugins.mpegts?.on(mpegts.Events.ERROR, async (error_type: string, detail: string) => {
 
-                    // DPlayer がすでに破棄されている場合は何もしない
-                    if (this.player === null) {
-                        return;
-                    }
+                    // このハンドラーを登録した映像がすでに切り替えられている場合は何もしない
+                    if (is_current_playback() === false) return;
 
                     // すぐ再起動すると問題があるケースがあるので、少し待機する
                     await Utils.sleep(1);
+                    if (is_current_playback() === false) return;
 
                     // もしこの時点でオフラインの場合、ネットワーク接続の変更による接続切断の可能性が高いので、オンラインになるまで待機する
                     if (navigator.onLine === false) {
-                        this.player.notice('現在ネットワーク接続がありません。オンラインになるまで待機しています…', undefined, undefined, '#FF6F6A');
+                        target_player.notice('現在ネットワーク接続がありません。オンラインになるまで待機しています…', undefined, undefined, '#FF6F6A');
                         console.warn('\u001b[31m[PlayerController] mpegts.js error event: Network error. Waiting for online...');
                         await Utils.waitUntilOnline();
+                        if (is_current_playback() === false) return;
                     }
 
                     // PlayerController の再起動を要求する
@@ -1500,28 +1529,31 @@ class PlayerController {
 
                 // DPlayer のスマホ向け UI ではミュート解除用の音量ボタンがないため、PC 向け UI の保存値だけ参照する
                 const should_keep_muted_after_live_startup =
-                    this.player.container.classList.contains('dplayer-mobile') === false &&
+                    target_player.container.classList.contains('dplayer-mobile') === false &&
                     localStorage.getItem('dplayer-is-muted') === 'true';
 
                 // 再生準備中の音声を出さないため、一時的にミュートする
                 // 保存済みミュートと区別し、volumechange 側で保存値を上書きしないようにする
-                this.is_live_startup_temporary_muted = this.player.video.muted === false;
-                this.player.video.muted = true;
+                this.live_startup_temporary_mute_owner = target_video.muted === false ? target_video : null;
+                target_video.muted = true;
 
                 // この時点で HTMLVideoElement.paused が true のとき、再生できるようになるまで 0.05 秒間を開けて 5 回試す
-                if (this.player.video.paused === true) {
+                if (target_video.paused === true) {
                     let attempts = 0;
                     const maxAttempts = 5;  // 試行回数
                     const attemptInterval = 0.05;  // 試行間隔 (秒)
                     const attemptPlay = async (): Promise<void> => {
+                        if (is_current_playback() === false) return;
                         if (attempts >= maxAttempts) {
                             console.warn(`\u001b[31m[PlayerController] Failed to start playback after ${maxAttempts} attempts.`);
                             return;
                         }
                         try {
-                            await this.player?.video.play();
+                            await target_video.play();
+                            if (is_current_playback() === false) return;
                             console.log('\u001b[31m[PlayerController] Playback started successfully.');
                         } catch (error) {
+                            if (is_current_playback() === false) return;
                             console.warn(`\u001b[31m[PlayerController] Attempt ${attempts + 1} to start playback failed:`, error);
                             attempts++;
                             await Utils.sleep(attemptInterval);
@@ -1529,6 +1561,7 @@ class PlayerController {
                         }
                     };
                     await attemptPlay();
+                    if (is_current_playback() === false) return;
                 }
 
                 // 再生準備ができた段階で再生バッファを調整し、再生準備ができた段階でローディング中の背景写真を非表示にするイベントハンドラーを登録
@@ -1536,16 +1569,16 @@ class PlayerController {
                 const on_canplay = async () => {
 
                     // 重複実行を回避する
-                    if (this.player === null) return;
+                    if (is_current_playback() === false) return;
                     if (on_canplay_called === true) return;
-                    this.player.video.oncanplay = null;
-                    this.player.video.oncanplaythrough = null;
+                    if (target_video.oncanplay === on_canplay) target_video.oncanplay = null;
+                    if (target_video.oncanplaythrough === on_canplay) target_video.oncanplaythrough = null;
                     on_canplay_called = true;
 
                     // 再生バッファ調整のため、一旦停止させる
                     // this.player.video.pause() を使うとプレイヤーの UI アイコンが停止してしまうので、代わりに playbackRate を使う
                     console.log('\u001b[31m[PlayerController] Buffering...');
-                    this.player.video.playbackRate = 0;
+                    target_video.playbackRate = 0;
 
                     // 再生バッファが live_playback_buffer_seconds を超えるまで 0.1 秒おきに再生バッファをチェックする
                     // 再生バッファが live_playback_buffer_seconds を切ると再生が途切れやすくなるので (特に動きの激しい映像)、
@@ -1555,11 +1588,12 @@ class PlayerController {
                     let current_playback_buffer_sec = this.getPlaybackBufferSeconds();
                     while (current_playback_buffer_sec < live_playback_buffer_seconds) {
                         await Utils.sleep(0.1);
+                        if (is_current_playback() === false) return;
                         current_playback_buffer_sec = this.getPlaybackBufferSeconds();
                     }
 
                     // 再生バッファ調整のため一旦停止していた再生を再び開始
-                    this.player.video.playbackRate = 1;
+                    target_video.playbackRate = 1;
                     console.log('\u001b[31m[PlayerController] Buffering completed.');
 
                     // ローディング状態を解除し、映像を表示する
@@ -1581,40 +1615,46 @@ class PlayerController {
 
                     // ユーザーがミュートを保存している場合は、再生開始時のフェードインでミュートを解除しない
                     if (should_keep_muted_after_live_startup === true) {
-                        this.is_live_startup_temporary_muted = false;
+                        if (this.live_startup_temporary_mute_owner === target_video) {
+                            this.live_startup_temporary_mute_owner = null;
+                        }
                     } else {
-                        this.is_live_startup_temporary_muted = false;
-                        this.player.video.muted = false;
+                        if (this.live_startup_temporary_mute_owner === target_video) {
+                            this.live_startup_temporary_mute_owner = null;
+                        }
+                        target_video.muted = false;
                         // ミュート中でない場合だけフェードインする (いきなり再生されるよりも体験が良い)
                         // 開始音量を 0 に下げてから、保存されている音量まで徐々に上げる
-                        this.player.video.volume = 0;
+                        target_video.volume = 0;
                         // 0.5 秒間かけて 0 から current_volume まで音量を上げる
-                        const current_volume = this.player.user.get('volume');  // 0.0 ~ 1.0 の範囲
+                        const current_volume = target_player.user.get('volume');  // 0.0 ~ 1.0 の範囲
                         const volume_step = current_volume / 10;
                         for (let i = 0; i < 10; i++) {  // 10 回に分けて音量を上げる
                             await Utils.sleep(0.5 / 10);
+                            if (is_current_playback() === false) return;
                             // 音量が current_volume を超えないようにする
                             // 浮動小数点絡みの問題 (丸め誤差) が出るため小数第3位で切り捨てる
-                            this.player.video.volume = Math.min(Utils.mathFloor(this.player.video.volume + volume_step, 3), current_volume);
+                            target_video.volume = Math.min(Utils.mathFloor(target_video.volume + volume_step, 3), current_volume);
                         }
                         // 最後に current_volume に設定し直す
                         // 上記ロジックでは丸め誤差の関係で完全に current_volume とは一致しないことがあるため
-                        this.player.video.volume = current_volume;
+                        target_video.volume = current_volume;
                     }
                 };
-                this.player.video.oncanplay = on_canplay;
-                this.player.video.oncanplaythrough = on_canplay;
+                target_video.oncanplay = on_canplay;
+                target_video.oncanplaythrough = on_canplay;
 
                 // 万が一 canplay(through) が発火しなかった場合のために (ほぼ Safari 向け) 、
                 // mpegts.js 側でメディア情報が取得できたタイミングでも再生開始を試みる
                 // 特に Safari 18 以降では MSE の canplay(through) が場合によっては発火しなかったり、発火が異常に遅かったりする…
                 // Safari 18 以降、MSE において canplay(through) の発火タイミングと readyState の値は信頼できない
-                this.player.plugins.mpegts?.on(mpegts.Events.MEDIA_INFO, async (info: {[key: string]: any}) => {
+                target_player.plugins.mpegts?.on(mpegts.Events.MEDIA_INFO, async (info: {[key: string]: any}) => {
+                    if (is_current_playback() === false) return;
                     console.log('\u001b[31m[PlayerController] mpegts.js media info:', info);
                     // 一応ブラウザネイティブの canplay(through) を優先したいので、0.25 秒待ってから再生開始を試みる
                     // 既に再生開始処理を実行済みの場合は実行しない
                     await Utils.sleep(0.25);
-                    if (on_canplay_called === false) {
+                    if (is_current_playback() === true && on_canplay_called === false) {
                         console.warn('\u001b[31m[PlayerController] mpegts.js media info fired, but canplay(through) event not fired. Trying to manually start playback.');
                         on_canplay();
                     }
@@ -1625,10 +1665,10 @@ class PlayerController {
                 // ほとんどのケースでは 先に上記 mpegts.js の MEDIA_INFO イベントが発火するため、この処理は実行されない
                 (async () => {
                     let have_future_data_count = 0;
-                    while (this.player !== null && this.player.video.readyState < 4) {
+                    while (is_current_playback() === true && target_video.readyState < 4) {
                         // プレイヤーが充分と判断する基準はまちまちでブラウザによっては HAVE_FUTURE_DATA のままタイムアウトするので
                         // HAVE_FUTURE_DATA がおおむね 5 秒つづけば HAVE_ENOUGH_DATA 扱いする
-                        if (this.player.video.readyState < 3) {
+                        if (target_video.readyState < 3) {
                             have_future_data_count = 0;
                         } else if (++have_future_data_count > 100) {
                             break;
@@ -1638,7 +1678,7 @@ class PlayerController {
                     // ループを終えた時点で readyState === HAVE_ENOUGH_DATA になっているので、再生開始を試みる
                     // 既に再生開始処理を実行済みの場合は実行しない
                     await Utils.sleep(0.1);
-                    if (on_canplay_called === false) {
+                    if (is_current_playback() === true && on_canplay_called === false) {
                         console.warn('\u001b[31m[PlayerController] canplay(through) event not fired. Trying to manually start playback.');
                         on_canplay();
                     }
@@ -1647,7 +1687,7 @@ class PlayerController {
                 // もしライブストリームのステータスが ONAir にも関わらず 15 秒以上バッファリング中で canplaythrough が発火しない場合、
                 // ロードに失敗したとみなし PlayerController の再起動を要求する
                 await Utils.sleep(15);
-                if (this.destroyed === true || this.player === null) return;
+                if (is_current_playback() === false) return;
                 if (player_store.live_stream_status === 'ONAir' && player_store.is_video_buffering === true && on_canplay_called === false) {
                     player_store.event_emitter.emit('PlayerRestartRequired', {
                         message: '再生開始までに時間が掛かっています。プレイヤーを再起動しています…',

@@ -9,6 +9,7 @@
         "dev": "concurrently --raw \"npm:akebi\" \"vite\"",
         "build": "vue-tsc --noEmit && vite build",
         "preview": "concurrently --raw \"npm:akebi\" \"vite preview\"",
+        "test:live-playback-generation": "node src/services/player/LivePlaybackGeneration.test.mjs",
         "lint": "eslint . --fix --ignore-path .gitignore",
         "typecheck": "vue-tsc --noEmit"
     },
