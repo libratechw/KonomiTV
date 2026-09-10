@@ -709,8 +709,9 @@ class PlayerController {
             pluginOptions: {
                 // mpeg2toh264
                 mpeg2toh264: {
-                    // 対応ブラウザでは変換処理と MediaSource を Web Worker 内へまとめ、メインスレッドの描画負荷から分離する
-                    mediaSource: 'auto',
+                    // Safari の録画再生では、画質切り替え後に Worker 内の MediaSource が InvalidStateError で停止する場合があるため、
+                    // MediaSource だけをメインスレッドに置く（MPEG-2 から H.264 への変換処理は引き続き Web Worker で実行される）
+                    mediaSource: this.playback_mode === 'Video' && Utils.isSafari() === true ? 'main' : 'auto',
                     // MPEG-2 を直接デコードできるブラウザ環境…もあるらしいがデインタレースができるかは不明なため、パススルーモードは使わない
                     passthrough: false,
                     // ライブ放送では選択中のサービスを明示する (tsreadex がすでに選択してくれているが念のため)
