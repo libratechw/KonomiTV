@@ -20,6 +20,8 @@ adaptive surfaceは通常Playerのtimelineから判定し、シーク中を除�
 
 ライブ一時停止の統合修正は、利用者の停止操作をPlayerControllerが所有し、Idlingによる自動再起動だけで新しいDPlayerへ引き継ぎます。内部エラーやOffline、Document PiP復帰に伴う停止とは区別し、手動再起動とエラー復旧は従来どおり再生を試みます。DPlayer・mpegts.js・mpeg2toh264の再生開始経路と15秒watchdogを同じ判断で制御し、破棄済みplayerから遅れて届くイベントも新しい世代へ作用させません。実行型fixtureでは、停止中のmpegts.js／Originalが再生を始めないこと、停止中に起動watchdogを動かさないこと、通常の画質切替と再生中の起動復旧を維持することを確認しています。実機dogfoodでは、ライブ専用の低遅延ON／OFFごとに停止維持、表示、音漏れ、1回の再生操作による復帰、再起動の反復有無を確認します。
 
+今回のv10は、上記の製品実装とdogfood fixtureを同じ公開helper契約へ揃え、`await`越しの破棄状態を実行時と同じbooleanとして再評価できるようにした配備候補です。typecheck、lint、fixture、構文・差分検査、focused 196 assertionsとfixture 48 assertionsの各3回実行に合格しました。公式snapshotを使った別sessionのMuse Spark 1.3 xhigh独立レビューもBlocker / High / Mediumなしで`dogfood-ready`と判定しています。これは静的・自動検証の合格であり、実機受入は配備後の同一bundle・低遅延ON／OFF比較で別に判断します。
+
 この復元対象版のMac Safariでは低遅延OFF/ON×停止5・30・120秒を各1回（6試行）、POCO ChromeではOFF/ON×停止120秒を各1回（2試行）測定し、停止維持と再生ボタン1回による復帰を確認しました。POCOは両試行ともIdlingによるplayer再構築を経て、復帰後15秒間進行しました。ただし停止位置は失われ、Macでは実際のMPEG-TS要求を捕捉していません。修正版のiPad・iPhone・Windowsでの一時停止と復帰、物理表示、可聴音声、A/V同期、長時間安定性は未確認です。「既知の健全版」ではなく、一部条件の再生・復帰を確認した復元対象版として扱います。
 
 DPlayer同期先guardの既存iPad比較は、非有限値除外済み版と負値も除外した版の比較です。未修正tsukumijima/master対最終候補の反復A/Bは未完了で、統合版の成功を単独修正の効果証明にはしません。また、iPhone・iPadで初期設定Originalだけ自動開始せず再生ボタンが必要だった問題は、別症状として調査中です。

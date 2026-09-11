@@ -21,7 +21,7 @@ import MediaSessionManager from '@/services/player/managers/MediaSessionManager'
 import PlayerManager from '@/services/player/PlayerManager';
 import Videos, { type IJikkyoComments } from '@/services/Videos';
 import useChannelsStore from '@/stores/ChannelsStore';
-import usePlayerStore from '@/stores/PlayerStore';
+import usePlayerStore, { type LiveRestartReason } from '@/stores/PlayerStore';
 import useSettingsStore, { LiveStreamingQuality, LIVE_STREAMING_QUALITIES, VideoStreamingQuality, VIDEO_STREAMING_QUALITIES } from '@/stores/SettingsStore';
 import Utils, { dayjs, PlayerUtils } from '@/utils';
 
@@ -130,13 +130,24 @@ class PlayerController {
     // この映像の一時ミュートで発火した volumechange だけを、ユーザー操作として保存しないために使う
     private live_startup_temporary_mute_owner: HTMLVideoElement | null = null;
 
-    // ライブ視聴でユーザーが明示的に停止したかどうか
-    // Idling による自動再構築でだけ引き継ぐ。エラー復旧・手動再起動は従来通り再生を試みる。
+    // ライブ視聴で利用者が明示的に停止したかどうか
+    // ステータス更新やエラー復旧の自動再構築でだけ引き継ぎ、手動再起動では破棄する
     private live_user_paused = false;
 
     // PlayerController / PlayerManager が要求した停止の対象 video
-    // pause イベントでこの値を消費し、内部停止をユーザー意図として記録しない。
+    // pause イベントは非同期に発火しうるため、この値をイベント側で消費し、
+    // 内部都合の停止を利用者の停止意図として記録しない
     private live_internal_pause_owner: HTMLVideoElement | null = null;
+
+    // 利用者操作として確定した停止要求の対象 video
+    // この要素の pause イベントでのみ消費し、別 video の pause では消費しない
+    private live_user_pause_requested_for: HTMLVideoElement | null = null;
+
+    // PlayerRestartRequired による再起動処理が進行中かどうか
+    // init() をまたいでも保持し、ネストした init が設置し直すハンドラーからの
+    // 並行再起動を拒否する。finally で必ず解放する
+    private is_player_restarting = false;
+
 
     /**
      * コンストラクタ
@@ -236,18 +247,56 @@ class PlayerController {
     }
 
 
-    /** ライブ再構築でユーザー停止を引き継ぐかを判定する */
-    private shouldAutoplayLiveAfterRestart(should_preserve_live_user_pause: boolean): boolean {
-        if (should_preserve_live_user_pause === true && this.live_user_paused === true) {
+    /**
+     * ライブの再構築で、破棄前に記録した利用者の停止意図を引き継ぐかを判定する
+     * 録画再生は常に再生を試みる。ライブは、利用者が明示的に停止していれば 'ManualRecovery' 以外で停止を維持する
+     * @param reason この再構築を要求した理由
+     * @returns 再構築後に再生を開始する場合は true、利用者の停止を維持する場合は false
+     */
+    private shouldAutoplayLiveAfterRestart(reason: LiveRestartReason): boolean {
+        // 録画再生は従来通り必ず再生を試みる
+        if (this.playback_mode !== 'Live') {
+            return true;
+        }
+        // 自動再構築では、利用者が明示的に停止していればその意図を引き継ぐ
+        // 停止を引き継ぐ間は live_user_paused を消費せず、続く再構築でも同じ停止意図を読めるようにする
+        if (reason !== 'ManualRecovery' && this.live_user_paused === true) {
             return false;
         }
-        // 明示的な再起動やエラー復旧では、古い停止理由を次の世代へ持ち込まない
-        this.live_user_paused = false;
+        // 明示的な復旧操作、または利用者が停止していない自動復旧では、古い停止意図を次の世代へ持ち込まない
+        this.setLiveUserPaused(false);
         return true;
     }
 
 
-    /** ユーザー操作ではないライブ停止を pause イベントより先に記録する */
+    /**
+     * ライブの利用者停止意図を、PlayerController と PlayerStore の両方へ一括して反映する
+     * UI 判断が生の video.paused ではなくこの明示的な意図を参照できるよう、更新箇所をここに集約する
+     * @param paused 利用者が明示的に停止している場合は true
+     */
+    private setLiveUserPaused(paused: boolean): void {
+        this.live_user_paused = paused;
+        usePlayerStore().is_live_user_paused = paused;
+    }
+
+
+    /**
+     * 利用者操作として確定したライブ停止要求を、正確な video に紐付けて記録する
+     * この要求は対象 video の pause イベントでのみ消費される
+     * @param video 停止を要求した対象の video
+     */
+    private requestLiveUserPause(video: HTMLVideoElement): void {
+        this.live_user_pause_requested_for = video;
+    }
+
+
+    /**
+     * 利用者操作ではないライブ停止を、pause イベントより先に内部停止として記録する
+     * pause イベントは非同期に発火しうるため、対象 video を保持してイベント側で消費する
+     * このマーカーは PlayerController が直後に video.pause() を実行する場合だけ使う
+     * スリープやオンライン待機をまたいで保持すると、その間に起きた利用者の停止まで内部扱いになる
+     * @param video 内部都合で停止させる対象の video
+     */
     private markLivePlaybackPauseAsInternal(video: HTMLVideoElement): void {
         if (this.playback_mode === 'Live') {
             this.live_internal_pause_owner = video;
@@ -255,11 +304,222 @@ class PlayerController {
     }
 
 
-    /** エラーに起因する停止をユーザー操作として引き継がないようにする */
-    private markLivePlaybackError(video: HTMLVideoElement): void {
-        if (this.playback_mode === 'Live') {
-            this.live_user_paused = false;
-            this.markLivePlaybackPauseAsInternal(video);
+    /**
+     * ライブのプレイヤー内画質切り替え後に再生を開始するかを判定する
+     * DPlayer は切替前の再生状態を引き継ぐため、利用者が停止していれば切り替え後も停止を維持する
+     * @returns 再生を開始する場合は true、停止を維持する場合は false
+     */
+    private shouldAutoplayLiveOnInPlayerQualityChange(): boolean {
+        if (this.playback_mode !== 'Live') {
+            return true;
+        }
+        return this.live_user_paused === false;
+    }
+
+
+    /**
+     * 停止状態で再構築されたライブ世代へ、利用者が最初に再生を要求したときだけ一度だけ
+     * 起動復旧と起動 stall 監視を有効にする
+     * mpegts は最初の play で通常起動と同じ準備処理が復旧も担うため、復旧は重ねない
+     * @param target_player 対象の DPlayer
+     * @param target_video 対象の video
+     * @param is_current_playback この世代が現在も有効かを返す関数
+     * @param run_recovery この helper から recoverPlayback() を実行する場合は true
+     */
+    private armLivePausedGenerationRecovery(
+        target_player: DPlayer,
+        target_video: HTMLVideoElement,
+        is_current_playback: () => boolean,
+        run_recovery: boolean,
+    ): void {
+        // この世代で一度だけ起動復旧を試みる
+        let has_started_recovery = false;
+        // play() が paused を false に変えただけでは再生開始とみなさない。
+        // この世代で実際に playing イベントを観測できたかだけを記録する
+        let has_reached_playing = false;
+        const on_playing = () => {
+            if (is_current_playback() === false) return;
+            has_reached_playing = true;
+        };
+        target_player.on('playing', on_playing);
+
+        const on_user_play = () => {
+            if (is_current_playback() === false) return;
+            if (has_started_recovery === true) return;
+            has_started_recovery = true;
+
+            // 利用者が要求した再生が始まったので、既存の再生復旧を一度だけ試みる
+            // (mpegts は通常起動の準備処理が復旧を担うため、ここでは重ねない)
+            if (run_recovery === true) {
+                this.recoverPlayback();
+            }
+
+            // 15 秒たっても実際の再生 (playing) を観測できない場合は、待ち続けずに再構築を要求する
+            window.setTimeout(() => {
+                if (is_current_playback() === false) return;
+                // 利用者が再び停止している場合は再構築しない
+                if (this.live_user_paused === true) return;
+                // readyState が高くても、実際に playing へ到達していなければ stall とみなす
+                if (has_reached_playing === true) return;
+                usePlayerStore().event_emitter.emit('PlayerRestartRequired', {
+                    message: '再生開始までに時間が掛かっています。プレイヤーを再起動しています…',
+                    live_restart_reason: 'StartupStall',
+                });
+            }, 15 * 1000);
+        };
+        target_player.on('play', on_user_play);
+    }
+
+
+    /**
+     * DPlayer の toggle() を一度だけラップし、Live の再生中からの停止操作を
+     * 正確な video に紐付いた利用者停止要求として記録する
+     * DPlayer の再生ボタン・映像面・コントローラーマスクはすべて toggle() を通る
+     */
+    private wrapDPlayerToggle(): void {
+        assert(this.player !== null);
+        const target_player = this.player;
+        const original_toggle = target_player.toggle.bind(target_player);
+        target_player.toggle = () => {
+            const video = target_player.video;
+            // Live の再生中からの停止要求だけを記録する。停止中の toggle は再生要求なので要求しない
+            if (this.playback_mode === 'Live' && video.paused === false) {
+                this.requestLiveUserPause(video);
+            }
+            original_toggle();
+        };
+    }
+
+
+    /**
+     * 停止状態で再構築された mpegts 世代へ、利用者の最初の play で通常起動の準備を一度だけ実行させる
+     * @param target_player 対象の DPlayer
+     * @param run_startup_preparation 通常起動と同じ再生準備処理
+     * @param is_current_playback この世代が現在も有効かを返す関数
+     */
+    private armLivePausedMpegtsStartup(
+        target_player: DPlayer,
+        run_startup_preparation: () => void,
+        is_current_playback: () => boolean,
+    ): void {
+        const on_user_play = () => {
+            // この世代の最初の play でのみ発火させる
+            target_player.off('play', on_user_play);
+            if (is_current_playback() === false) return;
+            run_startup_preparation();
+        };
+        target_player.on('play', on_user_play);
+    }
+
+
+    /**
+     * 停止状態で再構築された mpeg2toh264 世代の背景を、実際に playing へ到達した時点で隠す
+     * canplay は停止中でも発火し得るため、背景を早く消して黒画面にしないために playing を待つ
+     * @param target_player 対象の DPlayer
+     * @param is_current_playback この世代が現在も有効かを返す関数
+     */
+    private hideLivePausedBackgroundOnPlaying(
+        target_player: DPlayer,
+        is_current_playback: () => boolean,
+    ): void {
+        const on_playing = () => {
+            target_player.off('playing', on_playing);
+            if (is_current_playback() === false) return;
+            usePlayerStore().is_background_display = false;
+        };
+        target_player.on('playing', on_playing);
+    }
+
+
+    /**
+     * ライブ起動準備の最終段で、保存されたミュート状態に応じて一時ミュートを解除しフェードインする
+     * 保存値は呼び出し時点で読むため、停止世代で利用者が後からミュートを変えても最新値に従う
+     * @param target_player 対象の DPlayer
+     * @param target_video 対象の video
+     * @param is_current_playback この世代が現在も有効かを返す関数
+     */
+    private async applyLiveStartupMuteRelease(
+        target_player: DPlayer,
+        target_video: HTMLVideoElement,
+        is_current_playback: () => boolean,
+    ): Promise<void> {
+        // 保存されたミュート状態はこの時点で判定する。停止世代では初回 play までに
+        // 利用者がミュートを変え得るため、初期化時の値に固定しない
+        if (this.shouldKeepMutedAfterLiveStartup(target_player) === true) {
+            // ミュート維持: 一時ミュート所有権だけ解放し、フェードインしない
+            if (this.live_startup_temporary_mute_owner === target_video) {
+                this.live_startup_temporary_mute_owner = null;
+            }
+            return;
+        }
+        if (this.live_startup_temporary_mute_owner === target_video) {
+            this.live_startup_temporary_mute_owner = null;
+        }
+        target_video.muted = false;
+        // ミュート中でない場合だけフェードインする (いきなり再生されるよりも体験が良い)
+        // 開始音量を 0 に下げてから、保存されている音量まで徐々に上げる
+        target_video.volume = 0;
+        // 0.5 秒間かけて 0 から current_volume まで音量を上げる
+        const current_volume = target_player.user.get('volume');  // 0.0 ~ 1.0 の範囲
+        const volume_step = current_volume / 10;
+        for (let i = 0; i < 10; i++) {  // 10 回に分けて音量を上げる
+            await Utils.sleep(0.5 / 10);
+            if (is_current_playback() === false) return;
+            // 音量が current_volume を超えないようにする
+            // 浮動小数点絡みの問題 (丸め誤差) が出るため小数第3位で切り捨てる
+            target_video.volume = Math.min(Utils.mathFloor(target_video.volume + volume_step, 3), current_volume);
+        }
+        // 最後に current_volume に設定し直す
+        // 上記ロジックでは丸め誤差の関係で完全に current_volume とは一致しないことがあるため
+        target_video.volume = current_volume;
+    }
+
+
+    /**
+     * ライブ起動時に保存されたミュート状態を維持すべきかを、呼び出し時点の保存値から判定する
+     * DPlayer のスマホ向け UI ではミュート解除用の音量ボタンがないため、PC 向け UI の保存値だけ参照する
+     * @param target_player 対象の DPlayer
+     * @returns 起動後もミュートを維持する場合は true
+     */
+    private shouldKeepMutedAfterLiveStartup(target_player: DPlayer): boolean {
+        return target_player.container.classList.contains('dplayer-mobile') === false &&
+            localStorage.getItem('dplayer-is-muted') === 'true';
+    }
+
+
+    /**
+     * ライブ 60 秒の強制シーク対象バッファかどうかを判定する
+     * 利用者が明示的に停止している場合は同期しない (停止中の停止位置を動かさない)
+     * @returns 強制シークすべき場合は true
+     */
+    private shouldForceSeekLiveBuffer(): boolean {
+        if (this.player === null) return false;
+        if (this.player.type !== 'mpegts') return false;
+        if (this.live_user_paused === true) return false;
+        if (this.player.video.paused === false) return false;
+        if (this.player.video.buffered.length < 1) return false;
+        return this.player.video.buffered.end(0) - this.player.video.currentTime > 30;
+    }
+
+
+    /**
+     * PlayerRestartRequired による再起動処理を直列化する
+     * インスタンスフィールドのガードは await destroy() / await init() をまたいで保持し、
+     * ネストした init() が設置し直したハンドラーからの並行再起動を拒否する
+     * finally で必ず解放するため、再起動が例外を投げても手動復旧はロックされない
+     * @param restart 実行する再起動処理
+     * @returns 実行できた場合は true、すでに再起動中で拒否した場合は false
+     */
+    private async runPlayerRestart(restart: () => Promise<void>): Promise<boolean> {
+        if (this.is_player_restarting === true) {
+            return false;
+        }
+        this.is_player_restarting = true;
+        try {
+            await restart();
+            return true;
+        } finally {
+            this.is_player_restarting = false;
         }
     }
 
@@ -289,8 +549,13 @@ class PlayerController {
 
         // 破棄済みかどうかのフラグを下ろす
         this.destroyed = false;
+        // 前の世代の video を指す内部停止・一時ミュートの所有権を、新しい世代へ持ち越さない
         this.live_startup_temporary_mute_owner = null;
         this.live_internal_pause_owner = null;
+        // 前の世代の video を指す利用者停止要求も新しい世代へ持ち越さない
+        this.live_user_pause_requested_for = null;
+        // 現在の世代の停止意図を PlayerStore へ同期する (新規チャンネルでは false、停止を引き継いだ再構築では true)
+        this.setLiveUserPaused(this.live_user_paused);
         this.is_offline_fallback_in_progress = false;
 
         // PlayerStore にプレイヤーを初期化したことを通知する
@@ -752,9 +1017,8 @@ class PlayerController {
             pluginOptions: {
                 // mpeg2toh264
                 mpeg2toh264: {
-                    // Safari の録画再生では、画質切り替え後に Worker 内の MediaSource が InvalidStateError で停止する場合があるため、
-                    // MediaSource だけをメインスレッドに置く（MPEG-2 から H.264 への変換処理は引き続き Web Worker で実行される）
-                    mediaSource: this.playback_mode === 'Video' && Utils.isSafari() === true ? 'main' : 'auto',
+                    // 対応ブラウザでは変換処理と MediaSource を Web Worker 内へまとめ、メインスレッドの描画負荷から分離する
+                    mediaSource: 'auto',
                     // MPEG-2 を直接デコードできるブラウザ環境…もあるらしいがデインタレースができるかは不明なため、パススルーモードは使わない
                     passthrough: false,
                     // ライブ放送では選択中のサービスを明示する (tsreadex がすでに選択してくれているが念のため)
@@ -948,12 +1212,23 @@ class PlayerController {
             }
         });
 
+        // DPlayer の再生/停止 UI (デスクトップの再生ボタン・モバイルの再生ボタン・映像面・
+        // コントローラーマスク) はすべて toggle() を呼ぶため、ここで一度だけラップする。
+        // 再生中からの停止操作を、正確な video に紐付いた利用者停止要求として記録する
+        this.wrapDPlayerToggle();
+
         // デバッグ用にプレイヤーインスタンスも window 直下に入れる
         (window as any).player = this.player;
 
-        // 停止中のライブ再起動では autoplay イベントが発生しないため、新しい video の状態を明示的に UI へ同期する
+        // 停止中のライブ再起動では play / pause イベントが発生しないため、新しい video の停止状態を明示的に UI へ同期する
+        // これをしないと、前の世代が再生中だった場合に UI が再生中表示のままになり、実際の停止状態と食い違う
         if (this.playback_mode === 'Live' && should_autoplay_live === false) {
             player_store.is_video_paused = this.player.video.paused;
+            // 新世代の停止時は復号フレームが存在しないため、生成済み背景を出して黒画面を避ける
+            // (スピナーは出さず、通常の停止コントロールを表示する)
+            player_store.is_loading = false;
+            player_store.is_video_buffering = false;
+            player_store.is_background_display = true;
         }
 
         // 万が一再生開始後にデバイスが自動デインタレースに対応していることが判明した場合は、再起動せず Deinterlacer の Canvas だけを停止する
@@ -990,6 +1265,7 @@ class PlayerController {
         // スマホ向け UI ではミュートを解除する音量ボタンが表示されないため、PC 向け UI の状態だけを保存する
         this.player.on('volumechange', () => {
             if (this.player === null || this.player.container.classList.contains('dplayer-mobile') === true) return;
+            // 起動時の一時ミュートで発火した volumechange は、利用者のミュート操作として保存しない
             if (this.live_startup_temporary_mute_owner === this.player.video) return;
             localStorage.setItem('dplayer-is-muted', this.player.video.muted ? 'true' : 'false');
         });
@@ -1102,7 +1378,6 @@ class PlayerController {
         // PlayerManager からプレイヤーの再起動が必要になったことを通知されたときのイベントハンドラーを登録する
         // このイベントは常にアプリケーション上で1つだけ登録されていなければならない
         // さもなければ使い終わった破棄済みの PlayerController が再起動イベントにより復活し、現在利用中の PlayerController と競合してしまう
-        let is_player_restarting = false;  // 現在再起動中かどうか
         player_store.event_emitter.off('PlayerRestartRequired');  // PlayerRestartRequired イベントの全てのイベントハンドラーを削除
         player_store.event_emitter.on('PlayerRestartRequired', async (event) => {
 
@@ -1118,51 +1393,51 @@ class PlayerController {
                 return;
             }
 
-            // 既に再起動中であれば何もしない (再起動が重複して行われるのを防ぐ)
-            if (is_player_restarting === true) {
+            // 再起動処理は PlayerController インスタンス全体で直列化する
+            // インスタンスフィールドなので、ネストした init() が設置し直したハンドラーからも
+            // 進行中の再起動を観測でき、並行して destroy()/init() が走るのを防げる
+            const did_restart = await this.runPlayerRestart(async () => {
+
+                // 現在の再生画質・再生速度・再生位置を取得
+                // この情報がプレイヤー再起動後にレジュームされる
+                const player = this.player;
+                assert(player !== null);
+                const should_resume_quality = event.should_resume_quality !== false;
+                const quality_index = player.qualityIndex ?? null;
+                // 画質プロファイルの既定値を優先する場合は直前の画質を引き継がない
+                const current_quality = should_resume_quality === true && player.options.video.quality && typeof quality_index === 'number'
+                    ? player.options.video.quality[quality_index]
+                    : null;
+                const current_playback_rate = player.video.playbackRate ?? null;
+                const current_time = player.video.currentTime ?? null;
+
+                // PlayerController 自身を破棄
+                await this.destroy();
+
+                // ライブ視聴時のみ即座に再起動すると諸々問題があるので、少し待つ
+                if (this.playback_mode === 'Live') {
+                    await Utils.sleep(0.5);
+                }
+
+                // 再構築後に再生するかは、生の video.paused ではなくコントローラが記録した利用者の停止意図から決める
+                // teardown / 待機中も操作できるため、判断は破棄が終わってから行う
+                // destroy() に伴う pause は this.player を null にした後の世代フェンスで除外されるので、内部停止マーカーは張らない
+                const should_autoplay_live = this.shouldAutoplayLiveAfterRestart(event.live_restart_reason);
+
+                // PlayerController 自身を再初期化
+                // 再起動完了時点でこの PlayerRestartRequired のイベントハンドラーは再登録されているはず
+                await this.init({
+                    // 現在の再生画質・再生速度 (ビデオ視聴時のみ)・再生位置 (ビデオ視聴時のみ) を引き継ぐ
+                    default_quality: current_quality ? current_quality.name : null,
+                    playback_rate: this.playback_mode === 'Video' ? current_playback_rate : null,
+                    seek_seconds: this.playback_mode === 'Video' ? current_time : null,
+                    should_autoplay_live: should_autoplay_live,
+                });
+            });
+            if (did_restart === false) {
                 console.warn('\u001b[31m[PlayerController] PlayerRestartRequired event received, but already restarting. Ignored.');
                 return;
             }
-            is_player_restarting = true;
-
-            // 現在の再生画質・再生速度・再生位置を取得
-            // この情報がプレイヤー再起動後にレジュームされる
-            const should_resume_quality = event.should_resume_quality !== false;
-            const quality_index = this.player.qualityIndex ?? null;
-            // 画質プロファイルの既定値を優先する場合は直前の画質を引き継がない
-            const current_quality = should_resume_quality === true && this.player.options.video.quality && typeof quality_index === 'number'
-                ? this.player.options.video.quality[quality_index]
-                : null;
-            const current_playback_rate = this.player.video.playbackRate ?? null;
-            const current_time = this.player.video.currentTime ?? null;
-            // Idling の自動再構築だけは、pause イベントから記録したユーザー意図を引き継ぐ。
-            // それ以外の再起動はエラー復旧を含め、従来通り必ず再生を試みる。
-            const should_autoplay_live = this.playback_mode === 'Live' ?
-                this.shouldAutoplayLiveAfterRestart(event.should_preserve_live_user_pause === true) : true;
-
-            // destroy() に伴う停止を、次の世代へ引き継ぐユーザー操作として記録しない
-            if (this.playback_mode === 'Live') {
-                this.markLivePlaybackPauseAsInternal(this.player.video);
-            }
-
-            // PlayerController 自身を破棄
-            await this.destroy();
-
-            // ライブ視聴時のみ即座に再起動すると諸々問題があるので、少し待つ
-            if (this.playback_mode === 'Live') {
-                await Utils.sleep(0.5);
-            }
-
-            // PlayerController 自身を再初期化
-            // 再起動完了時点でこの PlayerRestartRequired のイベントハンドラーは再登録されているはず
-            await this.init({
-                // 現在の再生画質・再生速度 (ビデオ視聴時のみ)・再生位置 (ビデオ視聴時のみ) を引き継ぐ
-                default_quality: current_quality ? current_quality.name : null,
-                playback_rate: this.playback_mode === 'Video' ? current_playback_rate : null,
-                seek_seconds: this.playback_mode === 'Video' ? current_time : null,
-                should_autoplay_live: should_autoplay_live,
-            });
-            is_player_restarting = false;
 
             // プレイヤー側にイベントの発火元から送られたメッセージ (プレイヤーを再起動中である旨) を通知する
             // 再初期化により、作り直した DPlayer が再び this.player にセットされているはず
@@ -1178,12 +1453,24 @@ class PlayerController {
             }
         });
 
-        // LiveEventManager などが要求する内部停止は、ユーザーの pause 意図と区別して記録する
+        // LiveEventManager などが要求する内部停止を、利用者の pause 意図と区別して記録する
+        // PlayerController が停止理由を所有し、pause イベントを利用者意図として記録しない
         player_store.event_emitter.off('PauseLivePlaybackInternally');
         player_store.event_emitter.on('PauseLivePlaybackInternally', () => {
-            if (this.playback_mode !== 'Live' || this.destroyed === true || this.player === null) return;
+            // 再構築中は destroy() 側が停止を所有しているため、ここから二重に停止しない
+            if (this.playback_mode !== 'Live' || this.destroying === true || this.destroyed === true || this.player === null) return;
             this.markLivePlaybackPauseAsInternal(this.player.video);
             this.player.pause();
+        });
+
+        // UI / OS メディア操作などから、正確な video に紐付いた利用者停止要求を受け取る
+        // 対象 video の pause イベントでのみ消費され、利用者の停止意図として latch される
+        player_store.event_emitter.off('RequestLiveUserPause');
+        player_store.event_emitter.on('RequestLiveUserPause', (event) => {
+            if (this.playback_mode !== 'Live' || this.destroyed === true || this.player === null) return;
+            // 現在の video 以外への要求は受け付けない (別世代の video を誤って対象にしない)
+            if (event.video !== this.player.video) return;
+            this.requestLiveUserPause(event.video);
         });
 
         // PlayerController.setControlDisplayTimer() の呼び出しを要求されたときのイベントハンドラーを登録する
@@ -1214,38 +1501,15 @@ class PlayerController {
                 </span>
             </div>
         `);
-        // PlayerRestartRequired イベントとは異なり、通知メッセージなしで即座に PlayerController を再起動する
-        this.player.container.querySelector('.dplayer-player-restart-icon')!.addEventListener('click', async () => {
-
-            // 現在の再生画質・再生速度・再生位置を取得
-            // この情報がプレイヤー再起動後にレジュームされる
-            const current_quality = this.player?.qualityIndex ? this.player.options.video.quality![this.player.qualityIndex] : null;
-            const current_playback_rate = this.player?.video.playbackRate ?? null;
-            const current_time = this.player?.video.currentTime ?? null;
-            // 明示的な再起動は、停止中でも従来通り再生を試みる
-            const should_autoplay_live = this.playback_mode === 'Live' ? this.shouldAutoplayLiveAfterRestart(false) : true;
-
-            // destroy() に伴う停止を、次の世代へ引き継ぐユーザー操作として記録しない
-            if (this.playback_mode === 'Live' && this.player !== null) {
-                this.markLivePlaybackPauseAsInternal(this.player.video);
-            }
-
-            // PlayerController 自身を破棄
-            // このイベントは手動で再起動した際に実行されるものなので、再初期化までは待たずに即座に再初期化する
-            await this.destroy();
-
-            // PlayerController 自身を再初期化
-            await this.init({
-                // 現在の再生画質・再生速度 (ビデオ視聴時のみ)・再生位置 (ビデオ視聴時のみ) を引き継ぐ
-                default_quality: current_quality ? current_quality.name : null,
-                playback_rate: this.playback_mode === 'Video' ? current_playback_rate : null,
-                seek_seconds: this.playback_mode === 'Video' ? current_time : null,
-                // 手動再起動は復旧操作なので、ライブでも従来通り再生を試みる
-                should_autoplay_live: should_autoplay_live,
+        // 再起動ボタンは R キーと同じ直列化された PlayerRestartRequired 経路に流す
+        // destroy / init を直接呼ぶと再起動イベントと並行して二重に再構築され得るため
+        this.player.container.querySelector('.dplayer-player-restart-icon')!.addEventListener('click', () => {
+            // 手動再起動は利用者が明示した復旧操作なので、ライブでも停止意図を破棄して再生を試みる
+            player_store.event_emitter.emit('PlayerRestartRequired', {
+                message: 'プレイヤーを再起動しました。',
+                is_error_message: false,
+                live_restart_reason: 'ManualRecovery',
             });
-
-            // 通知を表示してから PlayerController を破棄すると DPlayer の DOM 要素ごと消えてしまうので、DPlayer を作り直した後に通知を表示する
-            this.player?.notice('プレイヤーを再起動しました。', undefined, undefined, undefined);
         });
 
         // Screen Wake Lock API を利用して画面の自動スリープを抑制する
@@ -1319,6 +1583,7 @@ class PlayerController {
     private async recoverPlayback(): Promise<void> {
         assert(this.player !== null);
         const player_store = usePlayerStore();
+        // 非同期の待機中に画質切り替えや再起動で世代が変わる場合があるため、対象を破棄前後で固定する
         const target_player = this.player;
         const target_video = target_player.video;
         const is_current_playback = () => this.destroying === false && this.destroyed === false &&
@@ -1326,7 +1591,7 @@ class PlayerController {
         const can_recover_playback = () => is_current_playback() === true &&
             !(this.playback_mode === 'Live' && this.live_user_paused === true);
 
-        // ユーザーが停止しているライブを、遅延した復旧処理で再生し直さない
+        // 利用者が停止しているライブを、遅延した復旧処理で再生し直さない
         if (can_recover_playback() === false) return;
 
         // 1 秒待つ
@@ -1403,14 +1668,12 @@ class PlayerController {
         // ライブ視聴: 再生停止状態かつ現在の再生位置からバッファが 30 秒以上離れていないかを 60 秒おきに監視し、そうなっていたら強制的にシークする
         // mpegts.js の仕様上、MSE 側に未再生のバッファが貯まり過ぎると新規に SourceBuffer が追加できなくなるため、強制的に接続が切断されてしまう
         // 再生停止状態でも定期的にシークすることで、バッファが貯まりすぎないように調節する
+        // DPlayer.sync() は currentTime を変更するだけで play() を呼ばないため、利用者の停止を維持したままバッファだけを調整できる
         if (this.playback_mode === 'Live') {
             this.live_force_seek_interval_timer_cancel = Utils.setIntervalInWorker(() => {
-                if (this.player === null) return;
-                // mpeg2toh264 は変換済みバッファを自身で管理するため、強制同期は mpegts.js の再生時だけ実行する
-                if (this.player.type !== 'mpegts') return;
-                if ((this.player.video.paused && this.player.video.buffered.length >= 1) &&
-                    (this.player.video.buffered.end(0) - this.player.video.currentTime > 30)) {
-                    this.player.sync();
+                // mpeg2toh264 や利用者の明示停止中は同期しない (停止位置をライブ端へ動かさない)
+                if (this.shouldForceSeekLiveBuffer() === true) {
+                    this.player?.sync();
                 }
             }, 60 * 1000);
         }
@@ -1433,21 +1696,39 @@ class PlayerController {
 
         // 再生/停止されたときのイベント
         // デバイスの通知バーからの制御など、ブラウザの画面以外から動画の再生/停止が行われる事もあるため必要
+        // ライブでは、このイベントを利用者の停止意図の唯一の記録点とし、
+        // PlayerController / PlayerManager が起こした内部停止は live_internal_pause_owner で除外する
         const playback_event_player = this.player;
         const on_play_or_pause = () => {
             // 破棄済みの DPlayer から遅れて届いたイベントを、新しい世代の状態として扱わない
             if (this.player !== playback_event_player) return;
             const playback_event_video = playback_event_player.video;
             if (this.playback_mode === 'Live') {
+                // 別 video 向けの要求は現在の世代に属さないため、latch せず破棄する
+                if (this.live_user_pause_requested_for !== null && this.live_user_pause_requested_for !== playback_event_video) {
+                    this.live_user_pause_requested_for = null;
+                }
                 if (playback_event_video.paused === true) {
+                    // 内部都合の停止が優先。同じ video に利用者要求が重なっていても、
+                    // 内部停止を利用者意図に変えず、要求も残さず消費する
                     if (this.live_internal_pause_owner === playback_event_video) {
                         this.live_internal_pause_owner = null;
-                    } else {
-                        this.live_user_paused = true;
+                        if (this.live_user_pause_requested_for === playback_event_video) {
+                            this.live_user_pause_requested_for = null;
+                        }
+                    // 正確な video への明示的な停止要求がある pause だけを利用者意図として記録する
+                    // 要求のない native pause は、たとえ直前の利用者操作があっても恒久的意図にしない
+                    } else if (this.live_user_pause_requested_for === playback_event_video) {
+                        this.live_user_pause_requested_for = null;
+                        this.setLiveUserPaused(true);
                     }
                 } else {
-                    this.live_user_paused = false;
-                    // エラー直後に再生が継続した場合、以降のユーザー停止へ内部停止の印を持ち越さない
+                    // 再生が始まったら利用者の停止意図と未消費の要求を解消する
+                    this.setLiveUserPaused(false);
+                    if (this.live_user_pause_requested_for === playback_event_video) {
+                        this.live_user_pause_requested_for = null;
+                    }
+                    // エラー直後に再生が継続した場合、以降の利用者停止へ内部停止の印を持ち越さない
                     if (this.live_internal_pause_owner === playback_event_video) {
                         this.live_internal_pause_owner = null;
                     }
@@ -1469,6 +1750,8 @@ class PlayerController {
         // 再生が一時的に止まってバッファリングしているとき/再び再生されはじめたときのイベント
         // バッファリングの Progress Circular の表示を制御する
         this.player.on('waiting', () => {
+            // 利用者が停止しているライブでは、再生を要求されるまでバッファリング表示へ移行しない
+            if (this.playback_mode === 'Live' && this.live_user_paused === true) return;
             // Progress Circular を表示する
             player_store.is_video_buffering = true;
         });
@@ -1505,8 +1788,8 @@ class PlayerController {
                     return;
                 }
 
-                // Native エラーに付随する pause を、Idling で引き継ぐユーザー操作として扱わない
-                this.markLivePlaybackError(player.video);
+                // ここでは PlayerController 自身は video を停止しないため、内部停止マーカーは付けない
+                // 直前に利用者が停止していればその意図を保ったまま、エラー再構築の可否を PlayerRestartRequired 側で決める
 
                 // すぐ再起動すると問題があるケースがあるので、少し待機する
                 await Utils.sleep(1);
@@ -1521,12 +1804,14 @@ class PlayerController {
                 console.error('\u001b[31m[PlayerController] HTMLVideoElement error event:', player.video.error);
                 player_store.event_emitter.emit('PlayerRestartRequired', {
                     message: `再生中にエラーが発生しました。(Native: ${player.video.error.code}: ${player.video.error.message}) プレイヤーを再起動しています…`,
+                    live_restart_reason: 'MediaError',
                 });
             } else {
                 // MediaError オブジェクトは場合によっては存在しないことがあるらしい…
                 // 存在しない場合は unknown error として扱う
                 player_store.event_emitter.emit('PlayerRestartRequired', {
                     message: '再生中にエラーが発生しました。(Native: unknown error) プレイヤーを再起動しています…',
+                    live_restart_reason: 'MediaError',
                 });
             }
         });
@@ -1542,9 +1827,11 @@ class PlayerController {
                 this.player === target_player && target_player.video === target_video;
 
             // 再起動直後だけは、破棄前の media element から渡された開始可否を使う。
-            // quality_start は DPlayer が切替前の再生状態に従って処理する通常の経路なので、
-            // 初期化時の停止状態を閉じ込めず、従来通り後続の再生復旧を有効にする。
-            const should_autoplay_live = is_initialization === true ? should_autoplay_live_on_initialization : true;
+            // プレイヤー内画質切り替えは、利用者が停止していれば切り替え後も停止を維持し、
+            // 再生中であれば従来通り再生を継続する (初期化時の停止状態を閉じ込めない)。
+            const should_autoplay_live = is_initialization === true
+                ? should_autoplay_live_on_initialization
+                : this.shouldAutoplayLiveOnInPlayerQualityChange();
 
             // 画質切り替え前の映像が所有していた一時ミュート状態を、現在の映像へ持ち越さない
             if (this.live_startup_temporary_mute_owner !== target_video) {
@@ -1565,11 +1852,31 @@ class PlayerController {
             // ライブ視聴時のみ
             if (this.playback_mode === 'Live') {
 
+                // 前の世代の video を指す停止要求は現在の世代へ持ち越さない
+                if (this.live_user_pause_requested_for !== target_video) {
+                    this.live_user_pause_requested_for = null;
+                }
+
+                // 停止状態で再構築された世代は、利用者が最初に再生を要求したときだけ
+                // 既存の起動復旧と stall 監視をこの世代に一度だけ有効にする
+                // 利用者が play するまで自動再生しない
+                if (should_autoplay_live === false) {
+                    // mpeg2toh264 は plugin 所有のバッファリングなので、単発の復旧と watchdog を使う
+                    // mpegts は最初の play で通常起動と同じ準備処理が復旧も担うため、watchdog だけを有効にする
+                    this.armLivePausedGenerationRecovery(
+                        target_player,
+                        target_video,
+                        is_current_playback,
+                        target_player.type !== 'mpegts',
+                    );
+                }
+
                 // mpeg2toh264 によるオリジナル画質再生時のみの専用処理
                 if (target_player.type === 'mpeg2toh264' && target_player.plugins.mpeg2toh264) {
-                    // 停止中の再起動では再生開始を要求しないため、起動待ち表示にも移行しない
+                    // 停止中の再構築では再生開始を要求しないため、起動待ち表示にも移行しない
                     player_store.is_loading = should_autoplay_live;
-                    player_store.is_background_display = should_autoplay_live;
+                    // 停止世代は復号フレームがないため、生成背景を出して黒画面を避ける
+                    player_store.is_background_display = true;
                     if (should_autoplay_live === false) {
                         player_store.is_video_buffering = false;
                     }
@@ -1577,13 +1884,14 @@ class PlayerController {
                     // 最初の映像が再生可能になった時点で背景と待機表示を解除する
                     let on_canplay_called = false;
                     const mpeg2toh264_player = target_player.plugins.mpeg2toh264;
-                    // 再生を要求した場合だけ起動タイムアウトを監視する。停止中の再起動へ適用すると、
-                    // canplay が発火しない実装では再起動を繰り返してしまう
+                    // 再生を要求した場合だけ起動タイムアウトを監視する。停止中の再構築へ適用すると、
+                    // canplay が発火しない実装では利用者の停止意図を失う再起動を繰り返してしまう
                     const startup_timeout_id = should_autoplay_live === true ? window.setTimeout(() => {
                         if (is_current_playback() === false || target_player.plugins.mpeg2toh264 !== mpeg2toh264_player ||
-                                on_canplay_called === true) return;
+                            on_canplay_called === true) return;
                         player_store.event_emitter.emit('PlayerRestartRequired', {
                             message: '再生開始までに時間が掛かっています。プレイヤーを再起動しています…',
+                            live_restart_reason: 'StartupStall',
                         });
                     }, 15 * 1000) : null;  // 15 秒でタイムアウト
                     const clear_startup_timeout = () => {
@@ -1600,16 +1908,25 @@ class PlayerController {
                         if (target_video.oncanplaythrough === on_canplay) target_video.oncanplaythrough = null;
                         player_store.is_loading = false;
                         player_store.is_video_buffering = false;
-                        player_store.is_background_display = false;
+                        // 停止世代では canplay で背景を消さず、実際の playing まで背景を維持する
+                        if (should_autoplay_live === true) {
+                            player_store.is_background_display = false;
+                        }
                     };
                     target_video.oncanplay = on_canplay;
                     target_video.oncanplaythrough = on_canplay;
+
+                    // 停止世代では canplay ではなく実際の playing で背景を隠す
+                    if (should_autoplay_live === false) {
+                        this.hideLivePausedBackgroundOnPlaying(target_player, is_current_playback);
+                    }
 
                     // 変換処理が失敗した場合は DPlayer のエラー表示を残し、プレイヤーを停止状態にする
                     mpeg2toh264_player.addEventListener('error', () => {
                         clear_startup_timeout();
                         if (is_current_playback() === true) {
-                            this.markLivePlaybackError(target_video);
+                            // この直後に自分で video を停止するので、その pause だけを内部停止として記録する
+                            this.markLivePlaybackPauseAsInternal(target_video);
                             target_player.pause();
                         }
                     }, {once: true});
@@ -1631,8 +1948,9 @@ class PlayerController {
                     // このハンドラーを登録した映像がすでに切り替えられている場合は何もしない
                     if (is_current_playback() === false) return;
 
-                    // mpegts.js がエラーに伴い停止しても、後続の Idling 再構築でユーザー停止として扱わない
-                    this.markLivePlaybackError(target_video);
+                    // ここからオンライン待機を挟んで再構築するまで PlayerController は video を停止しない
+                    // 内部停止マーカーを先に張ると、待機中に利用者が停止しても内部扱いで握り潰されるため付けない
+                    // 利用者の停止意図は pause イベントから記録され、再構築時の live_restart_reason で引き継がれる
 
                     // すぐ再起動すると問題があるケースがあるので、少し待機する
                     await Utils.sleep(1);
@@ -1650,20 +1968,17 @@ class PlayerController {
                     console.error('\u001b[31m[PlayerController] mpegts.js error event:', error_type, detail);
                     player_store.event_emitter.emit('PlayerRestartRequired', {
                         message: `再生中にエラーが発生しました。(${error_type}: ${detail}) プレイヤーを再起動しています…`,
+                        live_restart_reason: 'MediaError',
                     });
                 });
 
                 // 停止中の Idling 再構築では起動処理も一時ミュートも行わず、待機 UI を残さない
+                // 停止世代は復号フレームがないため、生成背景を出して黒画面を避ける
                 player_store.is_loading = should_autoplay_live;
-                player_store.is_background_display = should_autoplay_live || channels_store.channel.current.is_radiochannel;
+                player_store.is_background_display = true;
                 if (should_autoplay_live === false) {
                     player_store.is_video_buffering = false;
                 }
-
-                // DPlayer のスマホ向け UI ではミュート解除用の音量ボタンがないため、PC 向け UI の保存値だけ参照する
-                const should_keep_muted_after_live_startup =
-                    target_player.container.classList.contains('dplayer-mobile') === false &&
-                    localStorage.getItem('dplayer-is-muted') === 'true';
 
                 // 再生準備中の音声を出さないため、一時的にミュートする
                 // 停止中の再構築では再生しないため、この所有権を作らずミュート状態を変更しない
@@ -1702,25 +2017,22 @@ class PlayerController {
 
                 // 再生準備ができた段階で再生バッファを調整し、再生準備ができた段階でローディング中の背景写真を非表示にするイベントハンドラーを登録
                 let on_canplay_called = false;
+                // この世代で再生準備 (バッファ調整・一時ミュート解除・背景除去・復旧) を開始してよいか
+                // 停止世代では利用者の最初の play まで false のままにし、停止中に発火した canplay で消費しない
+                let has_user_requested_play = should_autoplay_live === true;
                 const on_canplay = async () => {
 
-                    // 重複実行を回避する
+                    // 重複実行・世代違いを回避する
                     if (is_current_playback() === false) return;
+                    // 停止世代では利用者が play するまで準備を消費しない
+                    if (has_user_requested_play === false) return;
                     if (on_canplay_called === true) return;
                     if (target_video.oncanplay === on_canplay) target_video.oncanplay = null;
                     if (target_video.oncanplaythrough === on_canplay) target_video.oncanplaythrough = null;
                     on_canplay_called = true;
 
-                    // 停止中の Idling 再構築では、バッファ待機・一時ミュート解除・復旧再生を開始しない
-                    if (should_autoplay_live === false) {
-                        player_store.is_loading = false;
-                        player_store.is_video_buffering = false;
-                        player_store.is_background_display = channels_store.channel.current.is_radiochannel;
-                        return;
-                    }
-
                     // 再生バッファ調整のため、一旦停止させる
-                    // this.player.video.pause() を使うとプレイヤーの UI アイコンが停止してしまうので、代わりに playbackRate を使う
+                    // target_video.pause() を使うとプレイヤーの UI アイコンが停止してしまうので、代わりに playbackRate を使う
                     console.log('\u001b[31m[PlayerController] Buffering...');
                     target_video.playbackRate = 0;
 
@@ -1747,10 +2059,8 @@ class PlayerController {
                     player_store.is_video_buffering = false;
 
                     // この時点で再生が開始できていない場合、再生状態の復旧を試みる
-                    // 停止中のライブ再起動では、再生復旧の video.play() も起動経路になり得るため呼ばない
-                    if (should_autoplay_live === true) {
-                        this.recoverPlayback();
-                    }
+                    // 停止世代でも、利用者の最初の play で通常起動と同じ準備を通った後なので一度だけ実行する
+                    this.recoverPlayback();
 
                     if (channels_store.channel.current.is_radiochannel === true) {
                         // ラジオチャンネルでは引き続き映像の代わりとしてローディング中の背景写真を表示し続ける
@@ -1760,36 +2070,24 @@ class PlayerController {
                         player_store.is_background_display = false;
                     }
 
-                    // ユーザーがミュートを保存している場合は、再生開始時のフェードインでミュートを解除しない
-                    if (should_keep_muted_after_live_startup === true) {
-                        if (this.live_startup_temporary_mute_owner === target_video) {
-                            this.live_startup_temporary_mute_owner = null;
-                        }
-                    } else {
-                        if (this.live_startup_temporary_mute_owner === target_video) {
-                            this.live_startup_temporary_mute_owner = null;
-                        }
-                        target_video.muted = false;
-                        // ミュート中でない場合だけフェードインする (いきなり再生されるよりも体験が良い)
-                        // 開始音量を 0 に下げてから、保存されている音量まで徐々に上げる
-                        target_video.volume = 0;
-                        // 0.5 秒間かけて 0 から current_volume まで音量を上げる
-                        const current_volume = target_player.user.get('volume');  // 0.0 ~ 1.0 の範囲
-                        const volume_step = current_volume / 10;
-                        for (let i = 0; i < 10; i++) {  // 10 回に分けて音量を上げる
-                            await Utils.sleep(0.5 / 10);
-                            if (is_current_playback() === false) return;
-                            // 音量が current_volume を超えないようにする
-                            // 浮動小数点絡みの問題 (丸め誤差) が出るため小数第3位で切り捨てる
-                            target_video.volume = Math.min(Utils.mathFloor(target_video.volume + volume_step, 3), current_volume);
-                        }
-                        // 最後に current_volume に設定し直す
-                        // 上記ロジックでは丸め誤差の関係で完全に current_volume とは一致しないことがあるため
-                        target_video.volume = current_volume;
-                    }
+                    // 保存済みミュートの判定はこの時点で行う
+                    // 停止世代では初回 play までに利用者がミュートを変え得るため、初期化時の値に固定しない
+                    await this.applyLiveStartupMuteRelease(target_player, target_video, is_current_playback);
                 };
                 target_video.oncanplay = on_canplay;
                 target_video.oncanplaythrough = on_canplay;
+
+                // 停止世代では、利用者の最初の play で通常起動と同じ準備を一度だけ実行する
+                // canplay はデータ到着時点で発火し得るため、play まで gate して消費しない
+                if (should_autoplay_live === false) {
+                    this.armLivePausedMpegtsStartup(target_player, () => {
+                        has_user_requested_play = true;
+                        // 通常起動と同じ一時ミュート所有権を、利用者の最初の play で取得する
+                        this.live_startup_temporary_mute_owner = target_video.muted === false ? target_video : null;
+                        target_video.muted = true;
+                        void on_canplay();
+                    }, is_current_playback);
+                }
 
                 // 万が一 canplay(through) が発火しなかった場合のために (ほぼ Safari 向け) 、
                 // mpegts.js 側でメディア情報が取得できたタイミングでも再生開始を試みる
@@ -1840,6 +2138,7 @@ class PlayerController {
                     if (player_store.live_stream_status === 'ONAir' && player_store.is_video_buffering === true && on_canplay_called === false) {
                         player_store.event_emitter.emit('PlayerRestartRequired', {
                             message: '再生開始までに時間が掛かっています。プレイヤーを再起動しています…',
+                            live_restart_reason: 'StartupStall',
                         });
                     }
                 }
@@ -1891,6 +2190,7 @@ class PlayerController {
                             message: '通信できないため、オフライン保存した映像へ切り替えました。',
                             should_resume_quality: false,
                             is_error_message: false,
+                            live_restart_reason: 'OfflineFallback',
                         });
                     });
                 } else if (this.player.type !== 'mpeg2toh264') {
@@ -2165,6 +2465,7 @@ class PlayerController {
                         is_error_message: false,
                         // モバイル回線プロファイル切り替え時、切り替え後の画質プロファイルのデフォルト画質を優先する
                         should_resume_quality: false,
+                        live_restart_reason: 'QualityProfileChange',
                     });
                 // 画質プロファイルを Wi-Fi 回線向けに切り替えてから、プレイヤーを再起動
                 } else {
@@ -2177,6 +2478,7 @@ class PlayerController {
                         is_error_message: false,
                         // Wi-Fi プロファイル切り替え時、切り替え後の画質プロファイルのデフォルト画質を優先する
                         should_resume_quality: false,
+                        live_restart_reason: 'QualityProfileChange',
                     });
                 }
             });
@@ -2545,7 +2847,7 @@ class PlayerController {
      * DPlayer と PlayerManager を破棄し、再生を終了する
      * 常に init() で作成したものが destroy() ですべてクリーンアップされるように実装すべき
      * PlayerController の再起動を行う場合、基本外部から直接 await destroy() と await init() は呼び出さず、代わりに
-     * player_store.event_emitter.emit('PlayerRestartRequired', 'プレイヤーを再起動しています…') のようにイベントを発火させるべき
+     * player_store.event_emitter.emit('PlayerRestartRequired', {message: 'プレイヤーを再起動しています…', live_restart_reason: '...'}) のようにイベントを発火させるべき
      */
     public async destroy(): Promise<void> {
         const settings_store = useSettingsStore();

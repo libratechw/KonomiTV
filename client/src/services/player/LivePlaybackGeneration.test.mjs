@@ -78,10 +78,27 @@ function makeFixture({initialType, initialPlay, initialReadyState = 0, shouldAut
         destroyed: false,
         live_startup_temporary_mute_owner: null,
         live_user_paused: false,
+        live_user_pause_requested_for: null,
         live_internal_pause_owner: null,
         live_playback_buffer_seconds: 4,
         getPlaybackBufferSeconds() { return 4; },
         recoverPlayback() {},
+        // v9 ownership: the startup block delegates to these controller-owned helpers.
+        setLiveUserPaused(paused) { this.live_user_paused = paused; },
+        requestLiveUserPause(target) { this.live_user_pause_requested_for = target; },
+        markLivePlaybackPauseAsInternal(target) { this.live_internal_pause_owner = target; },
+        shouldAutoplayLiveOnInPlayerQualityChange() { return this.live_user_paused === false; },
+        armLivePausedGenerationRecovery() {},
+        armLivePausedMpegtsStartup() {},
+        hideLivePausedBackgroundOnPlaying() {},
+        async applyLiveStartupMuteRelease(target_player, target_video) {
+            // The authenticated saved-mute decision is covered by the focused v9 contract;
+            // this double only releases the startup temporary mute for the fixture's autoplay case.
+            if (this.live_startup_temporary_mute_owner === target_video) {
+                this.live_startup_temporary_mute_owner = null;
+            }
+            target_video.muted = false;
+        },
     };
     const playerStore = {
         live_stream_status: 'ONAir',
@@ -148,7 +165,9 @@ for (const initialType of ['mpegts', 'mpeg2toh264']) {
         assert.equal(fixture.video.muted, false, `${initialType} paused restart must not change mute state`);
         assert.equal(fixture.playerStore.is_loading, false, `${initialType} paused restart must clear loading`);
         assert.equal(fixture.playerStore.is_video_buffering, false, `${initialType} paused restart must clear buffering`);
-        assert.equal(fixture.playerStore.is_background_display, false, `${initialType} paused restart must clear background`);
+        // v9 keeps the generated background for a paused rebuild (the destroyed video has no decoded
+        // frame), while the buffering spinner stays off. The focused v9 contract covers the same rule.
+        assert.equal(fixture.playerStore.is_background_display, true, `${initialType} paused restart must keep the generated background`);
         if (initialType === 'mpeg2toh264') assert.equal(fixture.timers.length, 0, 'paused Original restart must not arm a startup timeout');
         await fixture.video.oncanplay?.();
         assert.equal(fixture.video.playbackRate, 1, `${initialType} paused restart must not leave the playback rate stopped`);
@@ -173,21 +192,23 @@ for (const initialType of ['mpegts', 'mpeg2toh264']) {
     }
 }
 
-// User pause is the only pause carried into an Idling reconstruction; internal errors and manual restarts keep autoplay.
+// User pause is the only pause carried into an automatic reconstruction; an
+// internal-owner pause wins over a same-video user request, and ManualRecovery
+// clears the intent. This mirrors the reviewed v9 ownership and reason contract.
 {
-    const helperStart = source.indexOf('private shouldAutoplayLiveAfterRestart(should_preserve_live_user_pause: boolean): boolean {');
+    const helperStart = source.indexOf('private shouldAutoplayLiveAfterRestart(reason: LiveRestartReason): boolean {');
     const helperBodyStart = source.indexOf('{', helperStart) + 1;
     const helperEnd = source.indexOf('\n    }\n\n\n    /**', helperBodyStart);
     assert.ok(helperStart >= 0 && helperEnd > helperBodyStart, 'live restart intent helper must exist');
     const shouldAutoplayLiveAfterRestart = new Function(
-        `return function shouldAutoplayLiveAfterRestart(should_preserve_live_user_pause) {${stripTypeScript(source.slice(helperBodyStart, helperEnd))}};`,
+        `return function shouldAutoplayLiveAfterRestart(reason) {${stripTypeScript(source.slice(helperBodyStart, helperEnd))}};`,
     )();
-    const errorStart = source.indexOf('private markLivePlaybackError(video: HTMLVideoElement): void {');
-    const errorBodyStart = source.indexOf('{', errorStart) + 1;
-    const errorEnd = source.indexOf('\n    }\n\n\n    /**', errorBodyStart);
-    assert.ok(errorStart >= 0 && errorEnd > errorBodyStart, 'live error pause marker must exist');
-    const markLivePlaybackError = new Function(
-        `return function markLivePlaybackError(video) {${stripTypeScript(source.slice(errorBodyStart, errorEnd))}};`,
+    const markStart = source.indexOf('private markLivePlaybackPauseAsInternal(video: HTMLVideoElement): void {');
+    const markBodyStart = source.indexOf('{', markStart) + 1;
+    const markEnd = source.indexOf('\n    }\n\n\n    /**', markBodyStart);
+    assert.ok(markStart >= 0 && markEnd > markBodyStart, 'live internal pause marker must exist');
+    const markLivePlaybackPauseAsInternal = new Function(
+        `return function markLivePlaybackPauseAsInternal(video) {${stripTypeScript(source.slice(markBodyStart, markEnd))}};`,
     )();
 
     const stateStart = source.indexOf('const playback_event_player = this.player;');
@@ -200,8 +221,10 @@ for (const initialType of ['mpegts', 'mpeg2toh264']) {
         player: {video, setting: {hide() {}}, on(name, callback) { callbacks[name] = callback; }},
         playback_mode: 'Live',
         live_user_paused: false,
+        live_user_pause_requested_for: null,
         live_internal_pause_owner: null,
-        markLivePlaybackPauseAsInternal(pausedVideo) { this.live_internal_pause_owner = pausedVideo; },
+        setLiveUserPaused(paused) { this.live_user_paused = paused; },
+        requestLiveUserPause(target) { this.live_user_pause_requested_for = target; },
         setControlDisplayTimer() {},
     };
     new Function('player_store', stripTypeScript(source.slice(stateStart, stateEnd + stateEndMarker.length))).call(
@@ -209,18 +232,25 @@ for (const initialType of ['mpegts', 'mpeg2toh264']) {
         {is_loading: false, is_video_buffering: true, is_video_paused: false},
     );
 
+    // An ordinary exact-video user pause latches; every automatic reason preserves it.
+    controller.requestLiveUserPause(video);
     video.paused = true;
     callbacks.pause();
-    assert.equal(controller.live_user_paused, true, 'ordinary pause records user intent');
-    assert.equal(shouldAutoplayLiveAfterRestart.call(controller, true), false, 'Idling preserves user pause');
-    assert.equal(shouldAutoplayLiveAfterRestart.call(controller, false), true, 'manual restart ignores preserved pause');
+    assert.equal(controller.live_user_paused, true, 'ordinary exact-video pause records user intent');
+    assert.equal(shouldAutoplayLiveAfterRestart.call(controller, 'LiveStatusReconnect'), false, 'Idling preserves user pause');
+    assert.equal(shouldAutoplayLiveAfterRestart.call(controller, 'MediaError'), false, 'MediaError preserves user pause');
+    assert.equal(shouldAutoplayLiveAfterRestart.call(controller, 'ManualRecovery'), true, 'manual restart ignores preserved pause');
+    assert.equal(controller.live_user_paused, false, 'manual restart clears the pause intent');
 
-    controller.live_user_paused = true;
-    markLivePlaybackError.call(controller, video);
+    // An internal pause wins over a same-video request: both markers are consumed and no user intent is recorded.
+    controller.requestLiveUserPause(video);
+    markLivePlaybackPauseAsInternal.call(controller, video);
+    video.paused = true;
     callbacks.pause();
-    assert.equal(controller.live_user_paused, false, 'internal error pause is not user intent');
+    assert.equal(controller.live_user_paused, false, 'internal pause is not user intent');
     assert.equal(controller.live_internal_pause_owner, null, 'internal pause ownership is consumed once');
-    assert.equal(shouldAutoplayLiveAfterRestart.call(controller, true), true, 'Idling after internal error keeps recovery autoplay');
+    assert.equal(controller.live_user_pause_requested_for, null, 'the same-video request is consumed too');
+    assert.equal(shouldAutoplayLiveAfterRestart.call(controller, 'LiveStatusReconnect'), true, 'no user pause remains after an internal pause');
 }
 
 // The restart-only intent must not leak into a later user-initiated quality change.

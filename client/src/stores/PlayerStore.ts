@@ -11,6 +11,26 @@ import useSettingsStore from '@/stores/SettingsStore';
 
 
 /**
+ * ライブ視聴のプレイヤー再構築を要求した理由
+ * 「自動再構築か、利用者が明示した復旧操作か」を boolean ではなく理由で表し、
+ * PlayerController が保持する利用者の停止意図を引き継ぐかをここから判断させる
+ */
+export type LiveRestartReason =
+    // LiveEventManager のステータス更新 (Idling / Restart / Offline) による自動再構築
+    | 'LiveStatusReconnect'
+    // HTMLVideoElement / mpegts.js / mpeg2toh264 のエラー復旧
+    | 'MediaError'
+    // ライブ開始のタイムアウトによる自動再構築
+    | 'StartupStall'
+    // 画質プロファイル切り替えによる再構築
+    | 'QualityProfileChange'
+    // 録画再生で、オンライン再生から保存版へ切り替える再構築
+    | 'OfflineFallback'
+    // 利用者が明示的に要求した再起動 (再起動ボタン / R キー)
+    | 'ManualRecovery';
+
+
+/**
  * プレイヤーに関連するイベントの型
  * PlayerManager 側からのイベントも UI 側からのイベントも PlayerEvents を通じて行う
  */
@@ -29,13 +49,18 @@ export type PlayerEvents = {
         message_delay_seconds?: number;  // メッセージを表示するまでの待機時間 (秒)
         is_error_message?: boolean;  // メッセージをエラーメッセージとして表示するか (既定は true)
         should_resume_quality?: boolean;  // 再起動後に直前の画質を引き継ぐかどうか (既定は true)
-        // Idling による自動再構築時だけ、ユーザーが明示的に停止していた状態を引き継ぐ
-        // それ以外の手動再起動・エラー復旧は従来通り再生を試みる
-        should_preserve_live_user_pause?: boolean;
+        // この再構築を要求した理由。'ManualRecovery' 以外の自動再構築では、
+        // PlayerController が記録した利用者の停止意図を引き継ぐ
+        live_restart_reason: LiveRestartReason;
     };
-    // ライブストリームの状態遷移など、ユーザー操作ではない理由で停止するよう PlayerController に依頼する
-    // PlayerController が停止理由を所有し、pause イベントをユーザー意図として記録しないために使う
+    // ライブストリームの状態遷移など、利用者操作ではない理由で停止するよう PlayerController に依頼する
+    // PlayerController が停止理由を所有し、pause イベントを利用者意図として記録しないために使う
     PauseLivePlaybackInternally: undefined;
+    // UI / OS メディア操作など、ライブの停止意思が確定した操作の直前に通知する
+    // 対象の video を必ず添え、PlayerController はその video の pause イベントでのみ消費する
+    RequestLiveUserPause: {
+        video: HTMLVideoElement;  // 停止を要求した対象の video (この要素以外の pause では消費しない)
+    };
     // PlayerController.setControlDisplayTimer() をそのまま呼び出す
     SetControlDisplayTimer: {
         event?: Event;  // マウスやタッチイベント (手動実行する際は省略する)
@@ -157,6 +182,11 @@ const usePlayerStore = defineStore('player', {
         // 既定で再生中とする
         is_video_paused: false,
 
+        // ライブ視聴で利用者が明示的に停止したかどうか
+        // PlayerController だけが更新し、LiveEventManager などの UI 判断はこの意図を参照する
+        // (生の video.paused と違い、autoplay ブロックや一時停止とは区別できる)
+        is_live_user_paused: false,
+
         // プレイヤーの背景を表示するか
         // 既定で表示しない
         is_background_display: false,
@@ -253,6 +283,7 @@ const usePlayerStore = defineStore('player', {
             this.is_loading = true;
             this.is_video_buffering = true;
             this.is_video_paused = false;
+            this.is_live_user_paused = false;
             this.is_background_display = false;
             this.background_url = '';
             this.shortcut_key_modal = false;

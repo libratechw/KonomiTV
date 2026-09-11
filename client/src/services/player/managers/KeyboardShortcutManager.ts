@@ -147,6 +147,8 @@ class KeyboardShortcutManager implements PlayerManager {
             // ***** プレイヤー *****
 
             // Space: 再生 / 一時停止の切り替え
+            // DPlayer.toggle() は PlayerController 側でラップされ、再生中からの停止は
+            // 正確な video への利用者停止要求として記録される
             {mode: 'Both', key: 'Space', repeat: false, ctrl: false, shift: false, alt: false, handler: () => {
                 this.player.toggle();
             }},
@@ -157,12 +159,14 @@ class KeyboardShortcutManager implements PlayerManager {
             // 以前はキャプチャタブ表示中のみ使えるショートカットだったが、キャプチャタブ以外を開いた際にキーが効かずに混乱することが分かったため、
             // 現在は常時 Space と Shift + Space 両方のショートカットを使えるようにしている
             {mode: 'Both', key: 'Space', repeat: false, ctrl: false, shift: true, alt: false, handler: () => {
+                // Shift + Space も Space と同じく PlayerController 側の toggle ラップで記録される
                 this.player.toggle();
             }},
 
             // Ctrl + ←: ライブ視聴: 停止して0.5秒早戻し
             {mode: 'Live', key: 'ArrowLeft', repeat: true, ctrl: true, shift: false, alt: false, handler: () => {
                 if (this.player.video.paused === false) {
+                    player_store.event_emitter.emit('RequestLiveUserPause', {video: this.player.video});
                     this.player.video.pause();
                 }
                 this.player.video.currentTime = this.player.video.currentTime - 0.5;
@@ -171,6 +175,7 @@ class KeyboardShortcutManager implements PlayerManager {
             // Ctrl + →: ライブ視聴: 停止して0.5秒早送り
             {mode: 'Live', key: 'ArrowRight', repeat: true, ctrl: true, shift: false, alt: false, handler: () => {
                 if (this.player.video.paused === false) {
+                    player_store.event_emitter.emit('RequestLiveUserPause', {video: this.player.video});
                     this.player.video.pause();
                 }
                 this.player.video.currentTime = this.player.video.currentTime + 0.5;
@@ -250,6 +255,8 @@ class KeyboardShortcutManager implements PlayerManager {
                 player_store.event_emitter.emit('PlayerRestartRequired', {
                     message: 'プレイヤーを再起動しました。',
                     is_error_message: false,  // 明示的に上記メッセージがエラーメッセージではないことを示す (通知時の色がデフォルトになる)
+                    // R キーは利用者が明示的に要求した復旧操作なので、ライブでも停止意図を破棄して再生を試みる
+                    live_restart_reason: 'ManualRecovery',
                 });
             }},
 

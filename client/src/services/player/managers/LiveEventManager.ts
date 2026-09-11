@@ -96,7 +96,8 @@ class LiveEventManager implements PlayerManager {
                 case 'Standby': {
 
                     // バッファリング中の Progress Circular を表示
-                    player_store.is_video_buffering = this.player.video.paused === false;
+                    // 利用者が明示的に停止している場合は、実際に再生中に戻るまで表示しない
+                    player_store.is_video_buffering = player_store.is_live_user_paused === false;
 
                     // プレイヤーの背景を表示する
                     player_store.is_background_display = true;
@@ -134,7 +135,8 @@ class LiveEventManager implements PlayerManager {
                     }
 
                     // バッファリング中の Progress Circular を表示
-                    player_store.is_video_buffering = this.player.video.paused === false;
+                    // 利用者が明示的に停止している場合は、実際に再生中に戻るまで表示しない
+                    player_store.is_video_buffering = player_store.is_live_user_paused === false;
 
                     // プレイヤーの背景を表示する
                     player_store.is_background_display = true;
@@ -153,6 +155,8 @@ class LiveEventManager implements PlayerManager {
 
                     // ライブストリーミングが開始される前にチャンネルを切り替えた際、稀にコメントが流れないことがある不具合のワークアラウンド
                     // TODO: リファクタリングで不要になってるかも？
+                    // 利用者が明示的に停止している video を再生中として扱うと、停止中なのに UI が再生中表示になってしまうため、
+                    // 実際に video が再生されている場合だけ再生中クラスへ揃える
                     if (this.player.video.paused === false && this.player.container.classList.contains('dplayer-paused')) {
                         this.player.container.classList.remove('dplayer-paused');
                         this.player.container.classList.add('dplayer-playing');
@@ -180,7 +184,8 @@ class LiveEventManager implements PlayerManager {
                     // ライブストリーミング API への接続が切断された可能性が高いので、PlayerController にプレイヤーの再起動を要求する
                     player_store.event_emitter.emit('PlayerRestartRequired', {
                         message: 'ストリーミング接続が切断されました。(Status: Idling) プレイヤーを再起動しています…',
-                        should_preserve_live_user_pause: true,
+                        // ステータス更新による自動再構築。利用者が停止していれば PlayerController が意図を引き継ぐ
+                        live_restart_reason: 'LiveStatusReconnect',
                     });
 
                     break;
@@ -194,12 +199,16 @@ class LiveEventManager implements PlayerManager {
                     player_store.event_emitter.emit('PlayerRestartRequired', {
                         // ステータス詳細 (再起動に至った理由) をプレイヤーに表示
                         message: event.detail,  // メッセージの末尾に「エンコードタスクを再起動しています… (ER-XX)」が入る
+                        // ステータス更新による自動再構築。利用者が停止していれば PlayerController が意図を引き継ぐ
+                        live_restart_reason: 'LiveStatusReconnect',
                     });
 
                     // バッファリング中の Progress Circular を表示 (不要だとは思うけど念のため)
-                    player_store.is_video_buffering = true;
+                    // 利用者が明示的に停止している場合は、実際に再生中に戻るまで表示しない
+                    player_store.is_video_buffering = player_store.is_live_user_paused === false;
 
                     // プレイヤーの背景を表示する (不要だとは思うけど念のため)
+                    // 停止中も新世代に復号フレームはないため、生成背景を出して黒画面を避ける
                     player_store.is_background_display = true;
 
                     break;
@@ -214,6 +223,8 @@ class LiveEventManager implements PlayerManager {
                     if (event.detail === 'ライブストリームは Offline です。') {
                         player_store.event_emitter.emit('PlayerRestartRequired', {
                             message: 'ストリーミング接続が切断されました。(Status: Offline) プレイヤーを再起動しています…',
+                            // ステータス更新による自動再構築。利用者が停止していれば PlayerController が意図を引き継ぐ
+                            live_restart_reason: 'LiveStatusReconnect',
                         });
                     }
 
@@ -229,7 +240,7 @@ class LiveEventManager implements PlayerManager {
                     this.player.danmaku!.clear();
 
                     // 動画を停止する
-                    // PlayerController に停止理由を渡し、pause イベントをユーザーの意図として扱わせない
+                    // PlayerController に停止理由を渡し、pause イベントを利用者の停止意図として扱わせない
                     player_store.event_emitter.emit('PauseLivePlaybackInternally');
 
                     // プレイヤーの背景を表示する
@@ -300,9 +311,11 @@ class LiveEventManager implements PlayerManager {
             if (is_eventsource_opened === false) {
 
                 // バッファリング中の Progress Circular を表示
-                player_store.is_video_buffering = true;
+                // 利用者が明示的に停止している場合は、実際に再生中に戻るまで表示しない
+                player_store.is_video_buffering = player_store.is_live_user_paused === false;
 
                 // プレイヤーの背景を表示する
+                // 停止中も新世代に復号フレームはないため、生成背景を出して黒画面を避ける
                 player_store.is_background_display = true;
             }
         })();

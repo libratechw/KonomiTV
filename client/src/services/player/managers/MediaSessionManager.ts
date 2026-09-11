@@ -94,7 +94,16 @@ class MediaSessionManager implements PlayerManager {
         // 再生
         navigator.mediaSession.setActionHandler('play', () => this.player?.play());
         // 停止
-        navigator.mediaSession.setActionHandler('pause', () => this.player?.pause());
+        navigator.mediaSession.setActionHandler('pause', () => {
+            // 再生中の video を停止する場合だけ、正確な video に紐付けて停止意思を通知する
+            // すでに停止している場合に通知すると、pause イベントが発火せず要求が残り、
+            // 後続の無関係な pause を利用者意図として誤認し得る
+            const player = this.player;
+            if (player?.video.paused === false) {
+                player_store.event_emitter.emit('RequestLiveUserPause', {video: player.video});
+            }
+            player?.pause();
+        });
         // 前/次の再生位置にシーク (ビデオ視聴時のみ)
         if (this.playback_mode === 'Video') {
             // 前の再生位置にシーク
