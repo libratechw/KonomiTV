@@ -3,7 +3,7 @@
 
 ## 配備構成と評価対象
 
-既存dogfoodの機能を保持し、再生経路の修正とmpeg2toh264のビット一致最適化・adaptive surfaceを統合しています。上流確認時点は2026-09-11、KonomiTV `13649f3`（Capture修正のPR #282を取り込み済み）です。問題別の結論は[公開調査](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood)を参照してください。実配備は運用manifestで管理し、branch先端と配信中のビルドを同一視しません。
+既存dogfoodの機能を保持し、再生経路の修正とmpeg2toh264のビット一致最適化・adaptive surfaceを統合しています。上流確認時点は2026-09-11、KonomiTV `13649f3`（Capture修正のPR #282を取り込み済み）です。問題別の結論は[公開調査](https://github.com/libratechw/konomitv-experience#konomitv-dogfood)を参照してください。実配備は運用manifestで管理し、branch先端と配信中のビルドを同一視しません。
 
 2026-09-11のDPlayer比較用一時配備からの復元対象は、source `d1e32d8`／client dist `677c29e`／DPlayer `2467f23`（image名 `live-pause-intent-677c29e`）です。以下はこの版に固定した確認結果です。サービスのhealthy・HTTP 200は稼働確認であり、再生品質や全端末の合格を意味しません。
 
@@ -24,9 +24,9 @@ adaptive surfaceは通常Playerのtimelineから判定し、シーク中を除�
 
 DPlayer同期先guardの既存iPad比較は、非有限値除外済み版と負値も除外した版の比較です。未修正tsukumijima/master対最終候補の反復A/Bは未完了で、統合版の成功を単独修正の効果証明にはしません。また、iPhone・iPadで初期設定Originalだけ自動開始せず再生ボタンが必要だった問題は、別症状として調査中です。
 
-2026-09-11のPOCO試験では、未修正DPlayer `a5f8478`を共通KonomiTV `d1e32d8`へ組み込んだ比較版で、直接Original開始・1080p設定での再生からの切替×低遅延OFF/ONを各3回実施し、12回とも再生が進みました。切替前の1080pの映像要求は未捕捉です。これは上流版側の結果であり、修正候補の効果確認ではありません。[条件と残る比較](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation/blob/main/REPORT.md#未修正dplayer上流版のpoco単独試験)を参照してください。
+2026-09-11のPOCO試験では、未修正DPlayer `a5f8478`を共通KonomiTV `d1e32d8`へ組み込んだ比較版で、直接Original開始・1080p設定での再生からの切替×低遅延OFF/ONを各3回実施し、12回とも再生が進みました。切替前の1080pの映像要求は未捕捉です。これは上流版側の結果であり、修正候補の効果確認ではありません。[条件と残る比較](https://github.com/libratechw/konomitv-experience/blob/main/REPORT.md#未修正dplayer上流版のpoco単独試験)を参照してください。
 
-Windows VCEEncC 9.06との混在環境向けに`--adapt-resolution`を除いた変更は取り消しました。対応する9.12と上流のコマンド生成を使う再測定では、IdeaPadのWindowsネイティブ環境でTVライブ1080pが低遅延OFF/ON各1回、約1分進行しました。可聴A/V同期・長時間安定性やLinux互換性まで確認した結果ではありません。[経緯と確認範囲](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation/blob/main/REPORT.md#windowsネイティブ環境のvce再生)を参照してください。
+Windows VCEEncC 9.06との混在環境向けに`--adapt-resolution`を除いた変更は取り消しました。対応する9.12と上流のコマンド生成を使う再測定では、IdeaPadのWindowsネイティブ環境でTVライブ1080pが低遅延OFF/ON各1回、約1分進行しました。可聴A/V同期・長時間安定性やLinux互換性まで確認した結果ではありません。[経緯と確認範囲](https://github.com/libratechw/konomitv-experience/blob/main/REPORT.md#windowsネイティブ環境のvce再生)を参照してください。
 
 S1の出力変更、未確認のqueue fallback撤去、診断専用のトレース・UIは含めません。既存のiOS Original停止や字幕の表示問題が解決したとは扱いません。録画参照先は既存の読み取り専用mountを維持します。
 
