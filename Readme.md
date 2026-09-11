@@ -5,9 +5,9 @@
 
 既存dogfoodの機能を保持し、再生経路の修正とmpeg2toh264のビット一致最適化・adaptive surfaceを統合しています。上流確認時点は2026-09-11、KonomiTV `13649f3`（Capture修正のPR #282を取り込み済み）です。問題別の結論は[公開調査](https://github.com/libratechw/konomitv-experience#konomitv-dogfood)を参照してください。実配備は運用manifestで管理し、branch先端と配信中のビルドを同一視しません。
 
-2026-09-11のDPlayer比較用一時配備からの復元対象は、source `d1e32d8`／client dist `677c29e`／DPlayer `2467f23`（image名 `live-pause-intent-677c29e`）です。以下はこの版に固定した確認結果です。サービスのhealthy・HTTP 200は稼働確認であり、再生品質や全端末の合格を意味しません。
+2026-09-12の現行配備は、source `3b8aed1`／client dist `56f83a7`／DPlayer `2467f23`（image名 `live-pause-v10-56f83a7`）、配信bundle `PlayerController-CSX_9kmA.js`です。7016のruntime、image label、health、API version、HTTPS配信hash、bootstrap smoke、録画mount read-onlyを照合済みです。サービスのhealthy・HTTP 200は稼働確認であり、再生品質や全端末の合格を意味しません。
 
-比較試験中は未修正上流版などを一時的に配信するため、この復元対象版が常時配信されているとは限りません。branchの構成、測定対象、実配信中の版を区別します。
+直前の統合dogfood `d1e32d8`／`677c29e`／`2467f23`は復旧用imageと配備前snapshotに保持しています。比較試験で未修正上流版などを一時的に配信した過去結果では、branchの構成、測定対象、実配信中の版を区別します。
 
 | component | 固定commit・版 | 日常利用で確認する変更 |
 | --- | --- | --- |
