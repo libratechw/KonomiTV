@@ -12,12 +12,13 @@ const source = process.env.PLAYER_CONTROLLER_GIT_REV ?
         'show', `${process.env.PLAYER_CONTROLLER_GIT_REV}:client/src/services/player/PlayerController.ts`,
     ], {encoding: 'utf8'}) :
     readFileSync(new URL('./PlayerController.ts', import.meta.url), 'utf8');
-const blockStart = source.indexOf('const on_init_or_quality_change = async () => {');
-const blockEndMarker = "this.player.on('quality_start', on_init_or_quality_change);";
+const blockStart = source.indexOf('const on_init_or_quality_change = async (is_initialization: boolean) => {');
+const blockEndMarker = "this.player.on('quality_start', () => on_init_or_quality_change(false));";
 const blockEnd = source.indexOf(blockEndMarker, blockStart);
 assert.ok(blockStart >= 0 && blockEnd > blockStart, 'live startup block must exist');
 
 const registerLiveStartup = new Function(
+    'should_autoplay_live_on_initialization',
     'player_store', 'channels_store', 'PlayerUtils', 'Utils', 'mpegts', 'Hls', 'OfflineVideos', 'assert',
     stripTypeScript(source.slice(blockStart, blockEnd + blockEndMarker.length)),
 );
@@ -46,13 +47,14 @@ function makeVideo(play) {
     };
 }
 
-function makeFixture({initialType, initialPlay}) {
+function makeFixture({initialType, initialPlay, initialReadyState = 0, shouldAutoplayLive = true}) {
     const callbacks = {};
     const restartEvents = [];
     const timers = [];
     const mpegtsPlugin = {on(name, callback) { callbacks[`mpegts:${name}`] = callback; }};
     const originalPlugin = new EventTarget();
     const video = makeVideo(initialPlay ?? (() => Promise.resolve()));
+    video.readyState = initialReadyState;
     const player = {
         type: initialType,
         video,
@@ -97,6 +99,7 @@ function makeFixture({initialType, initialPlay}) {
     globalThis.localStorage = {getItem() { return null; }};
     registerLiveStartup.call(
         controller,
+        shouldAutoplayLive,
         playerStore,
         {channel: {current: {is_radiochannel: false}}},
         {generatePlayerBackgroundURL() { return 'fixture'; }},
@@ -121,6 +124,44 @@ function makeFixture({initialType, initialPlay}) {
             globalThis.localStorage = previousLocalStorage;
         },
     };
+}
+
+// A paused live restart must not call any explicit startup path for the replacement video.
+for (const initialType of ['mpegts', 'mpeg2toh264']) {
+    const fixture = makeFixture({
+        initialType,
+        initialReadyState: 4,
+        shouldAutoplayLive: false,
+        initialPlay: () => Promise.reject(new Error('paused restart must not play')),
+    });
+    try {
+        await Promise.resolve();
+        assert.equal(fixture.video.playCalls, 0, `${initialType} paused restart must not play`);
+        assert.equal(fixture.video.paused, true, `${initialType} paused restart must stay paused`);
+        if (initialType === 'mpeg2toh264') {
+            assert.equal(fixture.timers.length, 0, 'paused Original restart must not arm a startup timeout');
+            assert.equal(fixture.playerStore.is_loading, false);
+            assert.equal(fixture.playerStore.is_video_buffering, false);
+            assert.equal(fixture.playerStore.is_background_display, false);
+        }
+    } finally {
+        fixture.restore();
+    }
+}
+
+// The restart-only intent must not leak into a later user-initiated quality change.
+{
+    const fixture = makeFixture({initialType: 'mpegts', initialReadyState: 4, shouldAutoplayLive: false});
+    try {
+        assert.equal(fixture.video.playCalls, 0);
+        const switchedVideo = makeVideo(() => Promise.resolve());
+        switchedVideo.readyState = 4;
+        fixture.player.video = switchedVideo;
+        await fixture.callbacks.quality_start();
+        assert.equal(switchedVideo.playCalls, 1, 'quality change must retain its existing startup behavior');
+    } finally {
+        fixture.restore();
+    }
 }
 
 // An old 1080p startup completion must not replace the new Original readiness handler.

@@ -235,14 +235,20 @@ class PlayerController {
         default_quality: string | null;
         playback_rate: number | null;
         seek_seconds: number | null;
+        // ライブ再起動時は、破棄前の再生状態をここで引き継ぐ
+        // 初回入場時は既定値 true のままなので、従来通り自動再生する
+        should_autoplay_live?: boolean;
     } = {
         default_quality: null,
         playback_rate: null,
         seek_seconds: null,
+        should_autoplay_live: true,
     }): Promise<void> {
         const channels_store = useChannelsStore();
         const player_store = usePlayerStore();
         const settings_store = useSettingsStore();
+        // 省略時は従来通り自動再生する。false は再起動前に意図的な停止を観測した場合だけ渡される。
+        const should_autoplay_live = options.should_autoplay_live !== false;
         console.log('\u001b[31m[PlayerController] Initializing...');
 
         // 破棄済みかどうかのフラグを下ろす
@@ -360,8 +366,9 @@ class PlayerController {
             liveSyncMinBufferSize: this.live_playback_buffer_seconds - 0.1,
             // ループ再生 (ライブ視聴では無効)
             loop: this.playback_mode === 'Live' ? false : true,
-            // 自動再生
-            autoplay: true,
+            // 録画は従来通り自動再生する。ライブの再起動時だけは、破棄前にユーザーが停止していた状態を
+            // init() の開始前に渡し、DPlayer 自身を含む全ての起動経路を最初から停止状態にする
+            autoplay: this.playback_mode === 'Video' || should_autoplay_live,
             // AirPlay 機能 (うまく動かないため無効化)
             airplay: false,
             // ショートカットキー（こちらで制御するため無効化）
@@ -907,6 +914,11 @@ class PlayerController {
         // デバッグ用にプレイヤーインスタンスも window 直下に入れる
         (window as any).player = this.player;
 
+        // 停止中のライブ再起動では autoplay イベントが発生しないため、新しい video の状態を明示的に UI へ同期する
+        if (this.playback_mode === 'Live' && should_autoplay_live === false) {
+            player_store.is_video_paused = this.player.video.paused;
+        }
+
         // 万が一再生開始後にデバイスが自動デインタレースに対応していることが判明した場合は、再起動せず Deinterlacer の Canvas だけを停止する
         // この設定値も更新しておくことで、同じ DPlayer 内で後からオリジナル画質へ切り替えた場合にも判定結果を適用する
         void decoder_deinterlace_probe_promise.then((result) => {
@@ -951,7 +963,7 @@ class PlayerController {
         this.player.controller.setAutoHide = (time: number) => {};
 
         // DPlayer に動画再生系のイベントハンドラーを登録する
-        this.setupVideoPlaybackHandler();
+        this.setupVideoPlaybackHandler(should_autoplay_live);
 
         // DPlayer のフルスクリーン関係のメソッドを無理やり上書きし、KonomiTV の UI と統合する
         this.setupFullscreenHandler();
@@ -1086,6 +1098,11 @@ class PlayerController {
                 : null;
             const current_playback_rate = this.player.video.playbackRate ?? null;
             const current_time = this.player.video.currentTime ?? null;
+            // Idling 再起動時の停止状態は、破棄前の media element が持つ観測値を引き継ぐ
+            // 新しい DPlayer を作った後に pause() しても音声やフレームが漏れるため、初期化前に取得する
+            // 内部のエラー処理や再生開始・復旧失敗が先に停止させた経路ではユーザー意図と区別できないため、
+            // その経路は別途の状態所有が必要
+            const should_autoplay_live = this.playback_mode === 'Live' ? this.player.video.paused === false : true;
 
             // PlayerController 自身を破棄
             await this.destroy();
@@ -1102,6 +1119,7 @@ class PlayerController {
                 default_quality: current_quality ? current_quality.name : null,
                 playback_rate: this.playback_mode === 'Video' ? current_playback_rate : null,
                 seek_seconds: this.playback_mode === 'Video' ? current_time : null,
+                should_autoplay_live: should_autoplay_live,
             });
             is_player_restarting = false;
 
@@ -1155,6 +1173,10 @@ class PlayerController {
             const current_quality = this.player?.qualityIndex ? this.player.options.video.quality![this.player.qualityIndex] : null;
             const current_playback_rate = this.player?.video.playbackRate ?? null;
             const current_time = this.player?.video.currentTime ?? null;
+            // 手動再起動も同じ所有元から、破棄前にライブの開始可否を確定する
+            // 内部のエラー処理や再生開始・復旧失敗による停止との区別は、別途の状態所有が必要
+            const should_autoplay_live = this.playback_mode === 'Live' && this.player !== null ?
+                this.player.video.paused === false : true;
 
             // PlayerController 自身を破棄
             // このイベントは手動で再起動した際に実行されるものなので、再初期化までは待たずに即座に再初期化する
@@ -1166,6 +1188,8 @@ class PlayerController {
                 default_quality: current_quality ? current_quality.name : null,
                 playback_rate: this.playback_mode === 'Video' ? current_playback_rate : null,
                 seek_seconds: this.playback_mode === 'Video' ? current_time : null,
+                // 手動再起動でも、ライブでユーザーが停止していたなら新規 video を一度も再生させない
+                should_autoplay_live: should_autoplay_live,
             });
 
             // 通知を表示してから PlayerController を破棄すると DPlayer の DOM 要素ごと消えてしまうので、DPlayer を作り直した後に通知を表示する
@@ -1309,7 +1333,7 @@ class PlayerController {
      * DPlayer に動画再生系のイベントハンドラーを登録する
      * 特にライブ視聴ではここで適切に再生状態の管理 (再生可能かどうか、エラーが発生していないかなど) を行う必要がある
      */
-    private setupVideoPlaybackHandler(): void {
+    private setupVideoPlaybackHandler(should_autoplay_live_on_initialization: boolean): void {
         assert(this.player !== null);
         const channels_store = useChannelsStore();
         const player_store = usePlayerStore();
@@ -1427,13 +1451,18 @@ class PlayerController {
 
         // 今回 (DPlayer 初期化直後) と画質切り替え開始時の両方のタイミングで実行する必要がある処理
         // mpegts.js などの DPlayer のプラグインは画質切り替え時に一旦破棄されるため、再度イベントハンドラーを登録する必要がある
-        const on_init_or_quality_change = async () => {
+        const on_init_or_quality_change = async (is_initialization: boolean) => {
             assert(this.player !== null);
             const target_player = this.player;
             const target_video = target_player.video;
             // DPlayer が画質切り替え時に生成した新しい video へ、以前の video の非同期処理を作用させない
             const is_current_playback = () => this.destroying === false && this.destroyed === false &&
                 this.player === target_player && target_player.video === target_video;
+
+            // 再起動直後だけは、破棄前の media element から渡された開始可否を使う。
+            // quality_start は DPlayer が切替前の再生状態に従って処理する通常の経路なので、
+            // 初期化時の停止状態を閉じ込めず、従来通り後続の再生復旧を有効にする。
+            const should_autoplay_live = is_initialization === true ? should_autoplay_live_on_initialization : true;
 
             // 画質切り替え前の映像が所有していた一時ミュート状態を、現在の映像へ持ち越さない
             if (this.live_startup_temporary_mute_owner !== target_video) {
@@ -1456,26 +1485,35 @@ class PlayerController {
 
                 // mpeg2toh264 によるオリジナル画質再生時のみの専用処理
                 if (target_player.type === 'mpeg2toh264' && target_player.plugins.mpeg2toh264) {
-                    player_store.is_loading = true;
-                    player_store.is_background_display = true;
+                    // 停止中の再起動では再生開始を要求しないため、起動待ち表示にも移行しない
+                    player_store.is_loading = should_autoplay_live;
+                    player_store.is_background_display = should_autoplay_live;
+                    if (should_autoplay_live === false) {
+                        player_store.is_video_buffering = false;
+                    }
 
                     // 最初の映像が再生可能になった時点で背景と待機表示を解除する
                     let on_canplay_called = false;
                     const mpeg2toh264_player = target_player.plugins.mpeg2toh264;
-                    const startup_timeout_id = window.setTimeout(() => {
+                    // 再生を要求した場合だけ起動タイムアウトを監視する。停止中の再起動へ適用すると、
+                    // canplay が発火しない実装では再起動を繰り返してしまう
+                    const startup_timeout_id = should_autoplay_live === true ? window.setTimeout(() => {
                         if (is_current_playback() === false || target_player.plugins.mpeg2toh264 !== mpeg2toh264_player ||
-                            on_canplay_called === true) return;
+                                on_canplay_called === true) return;
                         player_store.event_emitter.emit('PlayerRestartRequired', {
                             message: '再生開始までに時間が掛かっています。プレイヤーを再起動しています…',
                         });
-                    }, 15 * 1000);  // 15 秒でタイムアウト
+                    }, 15 * 1000) : null;  // 15 秒でタイムアウト
+                    const clear_startup_timeout = () => {
+                        if (startup_timeout_id !== null) window.clearTimeout(startup_timeout_id);
+                    };
                     const on_canplay = () => {
                         if (is_current_playback() === false || on_canplay_called === true) {
-                            window.clearTimeout(startup_timeout_id);
+                            clear_startup_timeout();
                             return;
                         }
                         on_canplay_called = true;
-                        window.clearTimeout(startup_timeout_id);
+                        clear_startup_timeout();
                         if (target_video.oncanplay === on_canplay) target_video.oncanplay = null;
                         if (target_video.oncanplaythrough === on_canplay) target_video.oncanplaythrough = null;
                         player_store.is_loading = false;
@@ -1487,10 +1525,13 @@ class PlayerController {
 
                     // 変換処理が失敗した場合は DPlayer のエラー表示を残し、プレイヤーを停止状態にする
                     mpeg2toh264_player.addEventListener('error', () => {
-                        window.clearTimeout(startup_timeout_id);
+                        clear_startup_timeout();
                         if (is_current_playback() === true) target_player.pause();
                     }, {once: true});
-                    target_player.play();
+                    // 停止中のライブ再起動では、DPlayer の autoplay と同じ判断で変換器にも play() させない
+                    if (should_autoplay_live === true) {
+                        target_player.play();
+                    }
 
                     // オリジナル画質では mpeg2toh264 自身がバッファを適切に管理してくれるため、mpegts.js 専用の同期処理はスキップする
                     return;
@@ -1538,7 +1579,7 @@ class PlayerController {
                 target_video.muted = true;
 
                 // この時点で HTMLVideoElement.paused が true のとき、再生できるようになるまで 0.05 秒間を開けて 5 回試す
-                if (target_video.paused === true) {
+                if (should_autoplay_live === true && target_video.paused === true) {
                     let attempts = 0;
                     const maxAttempts = 5;  // 試行回数
                     const attemptInterval = 0.05;  // 試行間隔 (秒)
@@ -1603,7 +1644,10 @@ class PlayerController {
                     player_store.is_video_buffering = false;
 
                     // この時点で再生が開始できていない場合、再生状態の復旧を試みる
-                    this.recoverPlayback();
+                    // 停止中のライブ再起動では、再生復旧の video.play() も起動経路になり得るため呼ばない
+                    if (should_autoplay_live === true) {
+                        this.recoverPlayback();
+                    }
 
                     if (channels_store.channel.current.is_radiochannel === true) {
                         // ラジオチャンネルでは引き続き映像の代わりとしてローディング中の背景写真を表示し続ける
@@ -1788,10 +1832,10 @@ class PlayerController {
         };
 
         // 初回実行
-        on_init_or_quality_change();
+        on_init_or_quality_change(true);
 
         // 画質切り替え開始時のイベント
-        this.player.on('quality_start', on_init_or_quality_change);
+        this.player.on('quality_start', () => on_init_or_quality_change(false));
 
         // 動画の統計情報の表示/非表示を切り替える隠しコマンドのイベントハンドラーを登録
         // iOS / iPadOS Safari では DPlayer 側の contextmenu が長押ししても発火しないため、代替の表示手段として用意

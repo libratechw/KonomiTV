@@ -3,24 +3,30 @@
 
 ## 配備構成と評価対象
 
-既存dogfood `5d60f726` の機能を保持し、mpeg2toh264のビット一致最適化とadaptive surfaceを追加しています。上流確認時点は2026-09-09、KonomiTV `13649f3`（Capture修正のPR #282を取り込み済み）、mpeg2toh264 `faf1464`、DPlayer `a5f8478` です。実配備の確認結果は[調査一覧](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)へ記録します。
+既存dogfoodの機能を保持し、再生経路の修正とmpeg2toh264のビット一致最適化・adaptive surfaceを統合しています。上流確認時点は2026-09-11、KonomiTV `13649f3`（Capture修正のPR #282を取り込み済み）です。実配備の確認結果は[調査一覧](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)へ記録します。
 
 | component | 固定commit・版 | 日常利用で確認する変更 |
 | --- | --- | --- |
-| KonomiTV | このbranchのsourceと追跡済みclient/dist | touch端末の中央操作、native error単一登録、Capture/LivePSI Worker単一公開を保持 |
-| DPlayer | [8e49bb7](https://github.com/libratechw/DPlayer/commit/8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512) | 置換済みvideoから届く遅延eventを現行videoへ作用させない |
+| KonomiTV | このbranchのsourceと追跡済みclient/dist | touch端末の中央操作、native error単一登録、Capture/LivePSI Worker単一公開に加え、画質切替前の非同期処理の世代隔離とライブ再起動時の一時停止維持を統合 |
+| DPlayer | [2467f23](https://github.com/libratechw/DPlayer/commit/2467f2367855572bb95e385f2ebdd4ecc65384b3) | 置換済みvideoから届く遅延eventを現行videoへ作用させず、非有限・負の同期位置を適用しない |
 | mpeg2toh264 | [1e0eb60](https://github.com/libratechw/mpeg2toh264/commit/1e0eb60841daeacb1deae3def0192cf53512638e) | 既存のIVTC索引化・完全picture保持・HTTP Range終端処理に、ビット一致hot-path 5件とadaptive surfaceを統合。試行期限と中断処理はsource `2f5ea1e`まで反映 |
 | Starlette | 公式 `1.6.0` | 上流の切断処理を使用。custom forkへの依存はない |
 
 adaptive surfaceは通常Playerのtimelineから判定し、シーク中を除いた持続的な約30Hzへの低下時に1×1 CSS pixelを更新します。POCOの正常録画では旧source `3f75bd0`で発動後に約60fpsへ戻ることを観測済みです。今回の試行期限・中断処理の修正は自動試験で確認しており、元の30Hz化の原因修正ではありません。自然回復との厳密な因果、電力・発熱、他端末への影響は未確認で、回復済みsurfaceが同じsessionのシーク間で維持される挙動も日常利用で評価します。
 
+ライブ一時停止の統合修正は、Idlingによる自動再起動前の停止状態を新しいDPlayerへ渡し、DPlayer・mpegts.js・mpeg2toh264の再生開始経路を同じ判断で制御します。実行型fixtureでは、停止中のmpegts.js／Originalが再生を始めないこと、停止中のOriginalで15秒の起動タイムアウトを作らないこと、通常の画質切替と再生中の起動復旧を維持することを確認しています。実機dogfoodでは、ライブ専用の低遅延ON／OFFごとに停止維持、表示、音漏れ、1回の再生操作による復帰、再起動の反復有無を確認します。
+
+この停止状態は現在の`HTMLVideoElement.paused`から取得するため、再生終了や内部の起動・復旧失敗による停止をユーザー操作と区別できません。手動のプレイヤー再起動も停止状態を維持し、mpegts.js画質では停止再起動中の待機表示がOriginalと異なります。これらはdogfoodで観察し、公開候補へ昇格する前に扱いを決めます。
+
 S1の出力変更、未確認のqueue fallback撤去、診断専用のトレース・UIは含めません。既存のiOS Original停止や字幕の表示問題が解決したとは扱いません。録画参照先は既存の読み取り専用mountを維持します。
 
 ## 再構築と確認
 
-Node.js 20.19.5、Yarn 1.22.22を使用します。`client/` で `yarn cache clean mpeg2toh264` と `yarn cache clean dplayer` の後、`yarn install --frozen-lockfile`、`yarn lint`、`yarn typecheck`、`yarn build` を実行します。依存pinと実際のpackage distを照合し、生成した `client/dist` はsourceと別commitで保存します。
+Node.js 20.19.5、Yarn 1.22.22を使用します。`client/` で `yarn cache clean mpeg2toh264` と `yarn cache clean dplayer` の後、`yarn install --frozen-lockfile`、`yarn lint`、`yarn typecheck`、`yarn test:live-playback-generation`、`yarn build` を実行します。依存pinと実際のpackage distを照合し、生成した `client/dist` はsourceと別commitで保存します。
 
-統合mpeg2toh264ではRust release tests、WASM build、型検査、IVTC・MSE・HTTP Range終端・adaptive surfaceテストとpackage buildが成功しています。KonomiTVのlint、型検査、client buildも成功しています。PR候補は変更の価値と影響に応じた証拠で判断します。明確な局所バグは長期利用を一律に要求せず、今回の描画・電力・発熱などの長期影響は2〜4週間ほどの日常利用を目安に確認します。
+`package.json`と`yarn.lock`のDPlayer pinは上流互換用の`8e49bb7`のままです。dogfoodの再構築では、DPlayer `2467f23`の`dist/`を依存assemblyへ明示的に反映し、`DPlayer.min.js`のSHA-256が`5b0afc9aa1ba0a60518469b6a04dcacfaae88aecac85de1ba88d41453e0a8358`であることを確認してからKonomiTV clientをbuildします。lockだけから再構築した成果物を同じdogfoodとして扱いません。
+
+統合mpeg2toh264ではRust release tests、WASM build、型検査、IVTC・MSE・HTTP Range終端・adaptive surfaceテストとpackage buildが成功しています。KonomiTVのfixture、lint、型検査、client buildも成功しています。PR候補は変更の価値と影響に応じた証拠で判断します。明確な局所バグは長期利用を一律に要求せず、今回の描画・電力・発熱などの長期影響は2〜4週間ほどの日常利用を目安に確認します。
 
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
