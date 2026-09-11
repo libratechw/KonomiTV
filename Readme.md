@@ -3,7 +3,9 @@
 
 ## 配備構成と評価対象
 
-既存dogfoodの機能を保持し、再生経路の修正とmpeg2toh264のビット一致最適化・adaptive surfaceを統合しています。上流確認時点は2026-09-11、KonomiTV `13649f3`（Capture修正のPR #282を取り込み済み）です。実配備の確認結果は[調査一覧](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood-branches)へ記録します。
+既存dogfoodの機能を保持し、再生経路の修正とmpeg2toh264のビット一致最適化・adaptive surfaceを統合しています。上流確認時点は2026-09-11、KonomiTV `13649f3`（Capture修正のPR #282を取り込み済み）です。問題別の結論は[公開調査](https://github.com/libratechw/konomitv-mpeg2ts-seek-investigation#konomitv-dogfood)を参照してください。実配備は運用manifestで管理し、branch先端と配信中のビルドを同一視しません。
+
+2026-09-11のDPlayer比較用一時配備からの復元対象は、source `d1e32d8`／client dist `677c29e`／DPlayer `2467f23`（image名 `live-pause-intent-677c29e`）です。以下はこの版に固定した確認結果です。サービスのhealthy・HTTP 200は稼働確認であり、再生品質や全端末の合格を意味しません。
 
 | component | 固定commit・版 | 日常利用で確認する変更 |
 | --- | --- | --- |
@@ -16,7 +18,9 @@ adaptive surfaceは通常Playerのtimelineから判定し、シーク中を除�
 
 ライブ一時停止の統合修正は、利用者の停止操作をPlayerControllerが所有し、Idlingによる自動再起動だけで新しいDPlayerへ引き継ぎます。内部エラーやOffline、Document PiP復帰に伴う停止とは区別し、手動再起動とエラー復旧は従来どおり再生を試みます。DPlayer・mpegts.js・mpeg2toh264の再生開始経路と15秒watchdogを同じ判断で制御し、破棄済みplayerから遅れて届くイベントも新しい世代へ作用させません。実行型fixtureでは、停止中のmpegts.js／Originalが再生を始めないこと、停止中に起動watchdogを動かさないこと、通常の画質切替と再生中の起動復旧を維持することを確認しています。実機dogfoodでは、ライブ専用の低遅延ON／OFFごとに停止維持、表示、音漏れ、1回の再生操作による復帰、再起動の反復有無を確認します。
 
-低遅延OFFの実測ではIdling再構築後も停止状態と1回の再生操作による復帰を確認しましたが、停止位置は失われてライブ端から復帰しました。Originalの停止中に再構築した場合、変換器が再生操作前から入力を維持するかは実機で再確認します。物理表示、可聴音声、A/V同期、長時間の反復安定性も公開候補への昇格前に確認します。
+この復元対象版のMac Safariでは低遅延OFF/ON×停止5・30・120秒を各1回（6試行）、POCO ChromeではOFF/ON×停止120秒を各1回（2試行）測定し、停止維持と再生ボタン1回による復帰を確認しました。POCOは両試行ともIdlingによるplayer再構築を経て、復帰後15秒間進行しました。ただし停止位置は失われ、Macでは実際のMPEG-TS要求を捕捉していません。修正版のiPad・iPhone・Windowsでの一時停止と復帰、物理表示、可聴音声、A/V同期、長時間安定性は未確認です。「既知の健全版」ではなく、一部条件の再生・復帰を確認した復元対象版として扱います。
+
+DPlayer同期先guardの既存iPad比較は、非有限値除外済み版と負値も除外した版の比較です。未修正tsukumijima/master対最終候補の反復A/Bは未完了で、統合版の成功を単独修正の効果証明にはしません。また、iPhone・iPadで初期設定Originalだけ自動開始せず再生ボタンが必要だった問題は、別症状として調査中です。
 
 S1の出力変更、未確認のqueue fallback撤去、診断専用のトレース・UIは含めません。既存のiOS Original停止や字幕の表示問題が解決したとは扱いません。録画参照先は既存の読み取り専用mountを維持します。
 
