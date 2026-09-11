@@ -219,7 +219,12 @@ class DocumentPiPManager implements PlayerManager {
                 // requestVideoFrameCallback() の通知だけが止まることがある
                 // 再生状態を一度確定させてから再開し、移動後の Document で映像フレームの通知を再始動する
                 if (should_resume_playback && this.is_destroying === false) {
-                    video.pause();
+                    // ライブではこの内部停止をユーザーの pause 意図として記録させない
+                    if (this.playback_mode === 'Live') {
+                        player_store.event_emitter.emit('PauseLivePlaybackInternally');
+                    } else {
+                        video.pause();
+                    }
                     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
                     if (this.is_destroying) {
                         return;

@@ -96,7 +96,7 @@ class LiveEventManager implements PlayerManager {
                 case 'Standby': {
 
                     // バッファリング中の Progress Circular を表示
-                    player_store.is_video_buffering = true;
+                    player_store.is_video_buffering = this.player.video.paused === false;
 
                     // プレイヤーの背景を表示する
                     player_store.is_background_display = true;
@@ -134,7 +134,7 @@ class LiveEventManager implements PlayerManager {
                     }
 
                     // バッファリング中の Progress Circular を表示
-                    player_store.is_video_buffering = true;
+                    player_store.is_video_buffering = this.player.video.paused === false;
 
                     // プレイヤーの背景を表示する
                     player_store.is_background_display = true;
@@ -153,7 +153,7 @@ class LiveEventManager implements PlayerManager {
 
                     // ライブストリーミングが開始される前にチャンネルを切り替えた際、稀にコメントが流れないことがある不具合のワークアラウンド
                     // TODO: リファクタリングで不要になってるかも？
-                    if (this.player.container.classList.contains('dplayer-paused')) {
+                    if (this.player.video.paused === false && this.player.container.classList.contains('dplayer-paused')) {
                         this.player.container.classList.remove('dplayer-paused');
                         this.player.container.classList.add('dplayer-playing');
                     }
@@ -173,14 +173,14 @@ class LiveEventManager implements PlayerManager {
 
                     // 手動で再起動したのにタイミングの関係で破棄前に Idling イベントを受け取ってしまうことがあるので、
                     // 1 秒ほど待機してから実行する (すでにプレイヤーが再起動中であれば PlayerRestartRequired イベントでは何も起こらない)
-                    if (this.destroyed === false) {
-                        await Utils.sleep(1);
-                    }
+                    await Utils.sleep(1);
+                    if ((this.destroyed as boolean) === true) return;
 
                     // 本来誰も視聴していないことを示す Idling ステータスを受信している場合、何らかの理由で
                     // ライブストリーミング API への接続が切断された可能性が高いので、PlayerController にプレイヤーの再起動を要求する
                     player_store.event_emitter.emit('PlayerRestartRequired', {
                         message: 'ストリーミング接続が切断されました。(Status: Idling) プレイヤーを再起動しています…',
+                        should_preserve_live_user_pause: true,
                     });
 
                     break;
@@ -229,7 +229,8 @@ class LiveEventManager implements PlayerManager {
                     this.player.danmaku!.clear();
 
                     // 動画を停止する
-                    this.player.video.pause();
+                    // PlayerController に停止理由を渡し、pause イベントをユーザーの意図として扱わせない
+                    player_store.event_emitter.emit('PauseLivePlaybackInternally');
 
                     // プレイヤーの背景を表示する
                     player_store.is_background_display = true;

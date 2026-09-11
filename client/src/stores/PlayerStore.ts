@@ -29,7 +29,13 @@ export type PlayerEvents = {
         message_delay_seconds?: number;  // メッセージを表示するまでの待機時間 (秒)
         is_error_message?: boolean;  // メッセージをエラーメッセージとして表示するか (既定は true)
         should_resume_quality?: boolean;  // 再起動後に直前の画質を引き継ぐかどうか (既定は true)
+        // Idling による自動再構築時だけ、ユーザーが明示的に停止していた状態を引き継ぐ
+        // それ以外の手動再起動・エラー復旧は従来通り再生を試みる
+        should_preserve_live_user_pause?: boolean;
     };
+    // ライブストリームの状態遷移など、ユーザー操作ではない理由で停止するよう PlayerController に依頼する
+    // PlayerController が停止理由を所有し、pause イベントをユーザー意図として記録しないために使う
+    PauseLivePlaybackInternally: undefined;
     // PlayerController.setControlDisplayTimer() をそのまま呼び出す
     SetControlDisplayTimer: {
         event?: Event;  // マウスやタッチイベント (手動実行する際は省略する)
