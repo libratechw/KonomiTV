@@ -1,46 +1,117 @@
-> [!NOTE]
-> `dogfood/integration` は日常利用用の唯一の統合branchです。実験を含み、branch全体を上流へ取り込む対象ではありません。旧 `dogfood/product-candidates` と `dogfood/adaptive-surface-next` は固定tagへ保存して役割を終了します。
+# KonomiTV dogfood/integration
 
-## 配備構成と評価対象
+本リポジトリ／ブランチは、複数の改善候補や修正を日常的な利用環境下で先行検証するための統合ブランチ（`dogfood/integration`）です。
 
-既存dogfoodの機能を保持し、再生経路の修正とmpeg2toh264のビット一致最適化・adaptive surfaceを統合しています。上流確認時点は2026-09-11、KonomiTV `13649f3`（Capture修正のPR #282を取り込み済み）です。問題別の結論は[公開調査](https://github.com/libratechw/konomitv-experience#konomitv-dogfood)を参照してください。実配備は運用manifestで管理し、branch先端と配信中のビルドを同一視しません。
+上流（upstream）へ直接そのままマージされる完成版ブランチではなく、各種修正の組み合わせによる動作傾向の把握、検証結果の収集、および未確認項目の洗い出しを目的としています。
 
-2026-09-12の現行配備は、source `3b8aed1`／client dist `56f83a7`／DPlayer `2467f23`（image名 `live-pause-v10-56f83a7`）、配信bundle `PlayerController-CSX_9kmA.js`です。7016のruntime、image label、health、API version、HTTPS配信hash、bootstrap smoke、録画mount read-onlyを照合済みです。サービスのhealthy・HTTP 200は稼働確認であり、再生品質や全端末の合格を意味しません。
+---
 
-直前の統合dogfood `d1e32d8`／`677c29e`／`2467f23`は復旧用imageと配備前snapshotに保持しています。比較試験で未修正上流版などを一時的に配信した過去結果では、branchの構成、測定対象、実配信中の版を区別します。
+## 1. このブランチの位置付け
 
-| component | 固定commit・版 | 日常利用で確認する変更 |
-| --- | --- | --- |
-| KonomiTV | このbranchのsourceと追跡済みclient/dist | touch端末の中央操作、native error単一登録、Capture/LivePSI Worker単一公開に加え、画質切替前の非同期処理の世代隔離とライブ再起動時の一時停止維持を統合 |
-| DPlayer | [2467f23](https://github.com/libratechw/DPlayer/commit/2467f2367855572bb95e385f2ebdd4ecc65384b3) | 置換済みvideoから届く遅延eventを現行videoへ作用させず、非有限・負の同期位置を適用しない |
-| mpeg2toh264 | [1e0eb60](https://github.com/libratechw/mpeg2toh264/commit/1e0eb60841daeacb1deae3def0192cf53512638e) | 既存のIVTC索引化・完全picture保持・HTTP Range終端処理に、ビット一致hot-path 5件とadaptive surfaceを統合。試行期限と中断処理はsource `2f5ea1e`まで反映 |
-| Starlette | 公式 `1.6.0` | 上流の切断処理を使用。custom forkへの依存はない |
+- **先行統合と日常検証**: 個別に提案された修正や依存コンポーネントの変更を統合し、実運用に近い環境で検証するためのブランチです。
+- **非確定版**: ここでの実装や挙動は検証中のものであり、動作が保証された安定版（production）ではありません。
+- **上流との関係**: 成果は検証結果をもとに整理・分割され、個別に上流へフィードバックされます。本ブランチが丸ごと上流に取り込まれるわけではありません。
 
-adaptive surfaceは通常Playerのtimelineから判定し、シーク中を除いた持続的な約30Hzへの低下時に1×1 CSS pixelを更新します。POCOの正常録画では旧source `3f75bd0`で発動後に約60fpsへ戻ることを観測済みです。今回の試行期限・中断処理の修正は自動試験で確認しており、元の30Hz化の原因修正ではありません。自然回復との厳密な因果、電力・発熱、他端末への影響は未確認で、回復済みsurfaceが同じsessionのシーク間で維持される挙動も日常利用で評価します。
+---
 
-ライブ一時停止の統合修正は、利用者の停止操作をPlayerControllerが所有し、Idlingによる自動再起動だけで新しいDPlayerへ引き継ぎます。内部エラーやOffline、Document PiP復帰に伴う停止とは区別し、手動再起動とエラー復旧は従来どおり再生を試みます。DPlayer・mpegts.js・mpeg2toh264の再生開始経路と15秒watchdogを同じ判断で制御し、破棄済みplayerから遅れて届くイベントも新しい世代へ作用させません。実行型fixtureでは、停止中のmpegts.js／Originalが再生を始めないこと、停止中に起動watchdogを動かさないこと、通常の画質切替と再生中の起動復旧を維持することを確認しています。実機dogfoodでは、ライブ専用の低遅延ON／OFFごとに停止維持、表示、音漏れ、1回の再生操作による復帰、再起動の反復有無を確認します。
+## 2. 配備状態とコミット情報
 
-今回のv10は、上記の製品実装とdogfood fixtureを同じ公開helper契約へ揃え、`await`越しの破棄状態を実行時と同じbooleanとして再評価できるようにした配備候補です。typecheck、lint、fixture、構文・差分検査、focused 196 assertionsとfixture 48 assertionsの各3回実行に合格しました。公式snapshotを使った別sessionのMuse Spark 1.3 xhigh独立レビューもBlocker / High / Mediumなしで`dogfood-ready`と判定しています。これは静的・自動検証の合格であり、実機受入は配備後の同一bundle・低遅延ON／OFF比較で別に判断します。
+本dogfood環境に配備されている主要コンポーネントのバージョンおよび配備状況は以下の通りです。
 
-この復元対象版のMac Safariでは低遅延OFF/ON×停止5・30・120秒を各1回（6試行）、POCO ChromeではOFF/ON×停止120秒を各1回（2試行）測定し、停止維持と再生ボタン1回による復帰を確認しました。POCOは両試行ともIdlingによるplayer再構築を経て、復帰後15秒間進行しました。ただし停止位置は失われ、Macでは実際のMPEG-TS要求を捕捉していません。修正版のiPad・iPhone・Windowsでの一時停止と復帰、物理表示、可聴音声、A/V同期、長時間安定性は未確認です。「既知の健全版」ではなく、一部条件の再生・復帰を確認した復元対象版として扱います。
+- **KonomiTV**: `e6d9cf7`
+- **DPlayer**: `2499f05`
+  - ライブ同期先が有限値かつ非負（0以上）でない場合に `currentTime` へ不正な代入を行わないガード処理
+  - 画質切替時の再生意図（再生状態の維持）を適切に扱う修正
+- **mpeg2toh264**: `1e0eb608`
 
-DPlayer同期先guardの既存iPad比較は、非有限値除外済み版と負値も除外した版の比較です。未修正tsukumijima/master対最終候補の反復A/Bは未完了で、統合版の成功を単独修正の効果証明にはしません。また、iPhone・iPadで初期設定Originalだけ自動開始せず再生ボタンが必要だった問題は、別症状として調査中です。
+### 配備ステータス
+- サービス基盤のヘルスチェック（health）、起動処理（bootstrap）、配信bundleのidentity一致確認、および録画領域マウントのread-only確認を通過済みです。
+- ※本READMEの更新に伴う再ビルドや再配備は行っていません。
 
-2026-09-11のPOCO試験では、未修正DPlayer `a5f8478`を共通KonomiTV `d1e32d8`へ組み込んだ比較版で、直接Original開始・1080p設定での再生からの切替×低遅延OFF/ONを各3回実施し、12回とも再生が進みました。切替前の1080pの映像要求は未捕捉です。これは上流版側の結果であり、修正候補の効果確認ではありません。[条件と残る比較](https://github.com/libratechw/konomitv-experience/blob/main/REPORT.md#未修正dplayer上流版のpoco単独試験)を参照してください。
+---
 
-Windows VCEEncC 9.06との混在環境向けに`--adapt-resolution`を除いた変更は取り消しました。対応する9.12と上流のコマンド生成を使う再測定では、IdeaPadのWindowsネイティブ環境でTVライブ1080pが低遅延OFF/ON各1回、約1分進行しました。可聴A/V同期・長時間安定性やLinux互換性まで確認した結果ではありません。[経緯と確認範囲](https://github.com/libratechw/konomitv-experience/blob/main/REPORT.md#windowsネイティブ環境のvce再生)を参照してください。
+## 3. 利用者向けの最小利用手順
 
-S1の出力変更、未確認のqueue fallback撤去、診断専用のトレース・UIは含めません。既存のiOS Original停止や字幕の表示問題が解決したとは扱いません。録画参照先は既存の読み取り専用mountを維持します。
+1. **アクセス**
+   - 検証管理者から共有された dogfood 用のWebアクセスURLをブラウザで開きます。
+2. **再生設定の選択**
+   - **画質設定**: 検証対象に応じて「Original（無変換）」またはトランスコード画質（1080p等）を選択します。
+   - **低遅延設定**: プレイヤー設定メニューより「低遅延（LL-HLS等）」のON／OFFを切り替えて挙動を確認します。
+3. **操作の確認**
+   - ライブ視聴の開始、画質切替、一時停止（pause）および再開（resume）、録画再生などを操作し、挙動を確認してください。
 
-## 再構築と確認
+※詳細な環境構築や正規のインストール手順については、後述の[上流README](#7-上流ドキュメントリンク)を参照してください。
 
-Node.js 20.19.5、Yarn 1.22.22を使用します。`client/` で `yarn cache clean mpeg2toh264` と `yarn cache clean dplayer` の後、`yarn install --frozen-lockfile`、`yarn lint`、`yarn typecheck`、`yarn test:live-playback-generation`、`yarn build` を実行します。依存pinと実際のpackage distを照合し、生成した `client/dist` はsourceと別commitで保存します。
+---
 
-`package.json`と`yarn.lock`のDPlayer pinは上流互換用の`8e49bb7`のままです。dogfoodの再構築では、DPlayer `2467f23`の`dist/`を依存assemblyへ明示的に反映し、`DPlayer.min.js`のSHA-256が`5b0afc9aa1ba0a60518469b6a04dcacfaae88aecac85de1ba88d41453e0a8358`であることを確認してからKonomiTV clientをbuildします。lockだけから再構築した成果物を同じdogfoodとして扱いません。
+## 4. 症状別の現在地
 
-統合mpeg2toh264ではRust release tests、WASM build、型検査、IVTC・MSE・HTTP Range終端・adaptive surfaceテストとpackage buildが成功しています。KonomiTVのfixture、lint、型検査、client buildも成功しています。PR候補は変更の価値と影響に応じた証拠で判断します。明確な局所バグは長期利用を一律に要求せず、今回の描画・電力・発熱などの長期影響は2〜4週間ほどの日常利用を目安に確認します。
+利用者環境で発生しうる主な症状について、現在の確認状況を整理しています。
 
-# <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
+| 対象操作・症状 | 現在の状況・確認済み内容 | 主な留意点・未確認事項 |
+| :--- | :--- | :--- |
+| **ライブ開始** | 配備環境のhealth/bootstrapと、POCOでの短時間browser受入を確認。 | 端末やネットワーク環境の違いによる初回バッファリング挙動、通常UIでの開始を含む全端末の再生。 |
+| **Original同期** | DPlayer `2499f05` による不正な同期先代入ガードを適用。 | 端末ごとの物理再生挙動や、同期復帰時の完全な一致は継続検証中。 |
+| **画質切替** | DPlayer `2499f05` にて切替時の再生意図維持を修正。 | 切替時の物理的な音声・映像の瞬断、高負荷時の安定性。 |
+| **一時停止／再開**<br>（Live pause / resume） | **POCO端末**: 短時間ブラウザ受入テストにおいて、低遅延OFF（3/3回成功）、低遅延ON（3/3回成功）を確認済み。 | 一時停止位置の完全な保持、実機での表示／音声／A-V同期、長時間安定性、および他端末への一般化は未確認。 |
+| **録画再生** | 録画マウントの読み取り専用（read-only）アクセス確認を通過。 | 長時間再生時の挙動、Safari等の特定ブラウザにおける挙動は未確認・検証中。 |
+
+---
+
+## 5. 検証の読み方と未確認範囲
+
+> [!IMPORTANT]
+> **「配備済み」は「全端末・全画質での合格」を意味しません。**
+> 限られた端末・条件下で短時間の受入が確認された項目であっても、物理的な表示品質や他端末での動作が保証されたものではありません。
+
+### 現在判明している未確認・継続検証範囲
+- **端末網羅性**: Windows、Linux、macOS、Android（Galaxy, POCO等）、iOS/iPadOS（iPad等）の全組み合わせにおける動作確認は完了していません。
+- **iPad / iPadOS (Safari等)**:
+  - Live Original の直接開始
+  - 1080p から Original への物理画質切替
+  - 録画の Safari 再生
+  - 実際の映像・音声（A/V）の出力整合性
+  - 長時間再生および発熱状況
+  - ポインター（マウス／トラックパッド）操作時の挙動
+  - LivePSI（番組情報等）の取得・表示挙動
+- **物理再生品質**: ブラウザ上の論理的なイベント受入だけでなく、実際のスピーカーからの音声出力、映像のカクつき、リップシンク（A-Vズレ）の確認。
+- **長期間・高負荷耐久性**: 長時間の連続視聴におけるメモリリーク、発熱、通信途絶時の復旧挙動。
+
+---
+
+## 6. 不具合報告に必要な情報
+
+検証中に異常や予期しない挙動を発見した場合は、以下の情報を添えて検証窓口へ報告してください。
+
+1. **発生日時**
+2. **利用端末および環境**
+   - OSバージョン（例: Windows 11, iPadOS 17, Android 14 など）
+   - ブラウザ種別とバージョン（例: Chrome, Safari, Edge など）
+3. **再生条件**
+   - 視聴種別（ライブ配信 / 録画）
+   - 画質設定（Original / 1080p / 720p など）
+   - 低遅延設定（ON / OFF）
+4. **具体的な操作手順と症状**
+   - どのような操作を行ったか（例: 1080pからOriginalへ切り替えた、一時停止して30秒後に再開した）
+   - 画面や音声で何が起きたか（例: スピナーが回り続けて再生が始まらない、映像のみ止まり音声だけ流れる）
+5. **ブラウザコンソールログ（取得可能な場合）**
+   - エラーメッセージや警告ログ
+
+---
+
+## 7. 上流ドキュメントリンク
+
+- [KonomiTV 利用体験の調査と公開結果](https://github.com/libratechw/konomitv-experience)
+- [KonomiTV 公式リポジトリ (GitHub)](https://github.com/tsukumijima/KonomiTV)
+- [KonomiTV 公式マニュアル・ドキュメント](https://github.com/tsukumijima/KonomiTV#readme)
+
+---
+
+## 標準KonomiTVの導入・設定
+
+詳細な導入・設定は、上流の標準マニュアルをこの後に収録しています。dogfood固有の配備状態と検証範囲は冒頭の章を正本とし、標準マニュアルの一般的な手順と混同しないでください。
+
+<img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
 <img width="100%" src="https://github.com/user-attachments/assets/6971f354-0418-4305-bf6d-b061142ffec6">
 <video controls src="https://github.com/user-attachments/assets/ee0b6df0-3bb0-40da-99f4-798437aa2f9c"></video>
