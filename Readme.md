@@ -16,7 +16,7 @@
 
 ### Live pause / resume（PLAYBACK-LIVE-002）
 
-Live Original の pause → hold → 1回の明示的な play → 進行を、共通入口の有界試験で確認しています。Windows Chrome、Mac Safari、Linux Chrome、Android POCO、Galaxy `SM-X930` では、該当runで要求経路、進行、owned cleanupを分けて記録しています。Galaxyの最新runは低遅延ON、10秒hold、同一documentのまま10サンプルが進行しました。
+Live Original の pause → hold → 1回の明示的な play → 進行を、共通入口の有界試験で確認しています。Windows Chrome、Mac Safari、Linux Chrome、Android POCO、Galaxy `SM-X930` の要求経路・進行・owned cleanupは各runへ分けて記録しています。Galaxyの最新runは低遅延ON、10秒hold、同一documentのまま10サンプルが進行しました。Linuxの最新run `20260915t105317881597z-linux-live-pause-hold10-resume` では、10.004秒hold、66サンプル、MPEGTS/events/PSI HTTP 200、owned Chrome cleanupを確認しました。
 
 この結果は、物理表示・音声・A/V同期、すべての端末、微細なカクつき、長時間品質の保証ではありません。iPad mini/Airの最新Appium/WDA試行は、RemoteXPC 8111拒否・automation-mode timeout・`xcodebuild` code 65でタブ到達前に停止したため、製品失敗とは分類していません。
 
