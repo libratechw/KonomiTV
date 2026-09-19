@@ -41,7 +41,13 @@
         "paths": {
             "@/*": [
                 "src/*",
-            ]
+            ],
+            // vite.config.mts の alias と同じ差し替えを型にも適用する。
+            // install 済み package の型は `autoFilm` のままのため、vendor した
+            // バンドルの型 (`film`) に揃える。README.md の「暫定であること」を参照。
+            "mpeg2toh264/yadif": [
+                "vendor/yadif-upstream/index.d.ts",
+            ],
         },
     },
     "include": [

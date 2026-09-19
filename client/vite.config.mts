@@ -33,7 +33,13 @@ export default defineConfig({
         },
     },
     resolve: {
-        alias: {'@': fileURLToPath(new URL('./src', import.meta.url))},
+        alias: {
+            '@': fileURLToPath(new URL('./src', import.meta.url)),
+            // 依存更新までの隔離経路: yadif だけ vendor したバンドルへ差し替える。
+            // 変換側 (mpeg2toh264/player) と固定 commit は変更しない。
+            // 詳細と再生成手順は client/vendor/yadif-upstream/README.md。
+            'mpeg2toh264/yadif': fileURLToPath(new URL('./vendor/yadif-upstream/index.js', import.meta.url)),
+        },
         extensions: ['.js', '.json', '.jsx', '.mjs', '.ts', '.tsx', '.vue'],
     },
     // mpeg2toh264 は配布済みの Worker を import.meta.url から解決するため、依存関係の事前バンドルから除外する
