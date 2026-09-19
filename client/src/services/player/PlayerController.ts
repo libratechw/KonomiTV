@@ -1035,7 +1035,6 @@ class PlayerController {
                         doubleRate: true,
                         // 24fps モードがオンの場合のみ、実写区間では 60fps でぬるぬる描画しつつ、
                         // 映画・アニメなど 24fps で制作された映像を自動検出し、余分なフレームを間引いて本来の動きに近づける
-                        // (vendor した yadif では option 名が film。README.md の「暫定であること」を参照)
                         film: this.playback_mode === 'Live' ? this.quality_profile.tv_24fps_mode : this.quality_profile.video_24fps_mode,
                     }) : undefined,
                 },
