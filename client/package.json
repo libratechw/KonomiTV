@@ -27,13 +27,13 @@
         "comlink": "^4.4.1",
         "copy-image-clipboard": "^2.1.2",
         "dayjs": "^1.11.13",
-        "dplayer": "github:libratechw/DPlayer#975965313279c09401cade52b8d14d7903cab0c4",
+        "dplayer": "git+https://github.com/libratechw/DPlayer.git#975965313279c09401cade52b8d14d7903cab0c4",
         "floating-vue": "^5.2.2",
         "hls.js": "^1.6.9",
         "idb": "^8.0.3",
         "mitt": "^3.0.1",
-        "mpeg2toh264": "github:libratechw/mpeg2toh264#38d7e8540b163a392c373e5f0c230eea1cbee8f8",
-        "mpegts.js": "github:tsukumijima/mpegts.js#bf4e49d0ff004cf7546237393a62c66e4b926dca",
+        "mpeg2toh264": "git+https://github.com/libratechw/mpeg2toh264.git#38d7e8540b163a392c373e5f0c230eea1cbee8f8",
+        "mpegts.js": "git+https://github.com/tsukumijima/mpegts.js.git#bf4e49d0ff004cf7546237393a62c66e4b926dca",
         "nanoid": "^5.1.16",
         "ohash": "^1.1.3",
         "piexifjs": "^2.0.0-beta.9",
@@ -48,7 +48,7 @@
         "vue-virtual-scroller": "^2.0.0-beta.8",
         "vuedraggable": "^4.1.0",
         "vuetify": "~3.7.1",
-        "web-bml": "github:tsukumijima/web-bml#47fec53cd66734d6cba0fff3c6dfcfc150043109"
+        "web-bml": "git+https://github.com/tsukumijima/web-bml.git#47fec53cd66734d6cba0fff3c6dfcfc150043109"
     },
     "devDependencies": {
         "@babel/types": "^7.25.4",

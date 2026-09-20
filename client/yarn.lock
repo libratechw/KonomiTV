@@ -2267,9 +2267,9 @@ doctrine@^3.0.0:
   dependencies:
     esutils "^2.0.2"
 
-"dplayer@github:libratechw/DPlayer#975965313279c09401cade52b8d14d7903cab0c4":
+"dplayer@git+https://github.com/libratechw/DPlayer.git#975965313279c09401cade52b8d14d7903cab0c4":
   version "1.33.1"
-  resolved "https://codeload.github.com/libratechw/DPlayer/tar.gz/975965313279c09401cade52b8d14d7903cab0c4"
+  resolved "git+https://github.com/libratechw/DPlayer.git#975965313279c09401cade52b8d14d7903cab0c4"
   dependencies:
     aribb24.js "~1.11.5"
     axios "^1.7.2"
@@ -3581,13 +3581,13 @@ mitt@^3.0.1:
   resolved "https://registry.yarnpkg.com/mitt/-/mitt-3.0.1.tgz#ea36cf0cc30403601ae074c8f77b7092cdab36d1"
   integrity sha512-vKivATfr97l2/QBCYAkXYDbrIWPM2IIKEl7YPhjCvKlG3kE2gm+uBo6nEXK3M5/Ffh/FLpKExzOQ3JJoJGFKBw==
 
-"mpeg2toh264@github:libratechw/mpeg2toh264#38d7e8540b163a392c373e5f0c230eea1cbee8f8":
+"mpeg2toh264@git+https://github.com/libratechw/mpeg2toh264.git#38d7e8540b163a392c373e5f0c230eea1cbee8f8":
   version "0.0.1"
-  resolved "https://codeload.github.com/libratechw/mpeg2toh264/tar.gz/38d7e8540b163a392c373e5f0c230eea1cbee8f8"
+  resolved "git+https://github.com/libratechw/mpeg2toh264.git#38d7e8540b163a392c373e5f0c230eea1cbee8f8"
 
-"mpegts.js@github:tsukumijima/mpegts.js#bf4e49d0ff004cf7546237393a62c66e4b926dca":
+"mpegts.js@git+https://github.com/tsukumijima/mpegts.js.git#bf4e49d0ff004cf7546237393a62c66e4b926dca":
   version "1.8.0"
-  resolved "https://codeload.github.com/tsukumijima/mpegts.js/tar.gz/bf4e49d0ff004cf7546237393a62c66e4b926dca"
+  resolved "git+https://github.com/tsukumijima/mpegts.js.git#bf4e49d0ff004cf7546237393a62c66e4b926dca"
   dependencies:
     es6-promise "^4.2.5"
 
@@ -4773,9 +4773,9 @@ vuetify@~3.7.1:
   resolved "https://registry.yarnpkg.com/vuetify/-/vuetify-3.7.19.tgz#386ab39900400e9aa811fa0569e10db650f54b84"
   integrity sha512-RrUpdBOGWGcT2oNLqXBiqYRudKTFqxTfr8lISl51Cuo80cfgRmbyDnlQQRWxE4QSNxcqXk6ZzBoJRUEXpW9C/w==
 
-"web-bml@github:tsukumijima/web-bml#47fec53cd66734d6cba0fff3c6dfcfc150043109":
+"web-bml@git+https://github.com/tsukumijima/web-bml.git#47fec53cd66734d6cba0fff3c6dfcfc150043109":
   version "1.0.1"
-  resolved "https://codeload.github.com/tsukumijima/web-bml/tar.gz/47fec53cd66734d6cba0fff3c6dfcfc150043109"
+  resolved "git+https://github.com/tsukumijima/web-bml.git#47fec53cd66734d6cba0fff3c6dfcfc150043109"
   dependencies:
     arib-mmt-tlv-ts "^2.0.2"
     crc-32 "^1.2.2"
