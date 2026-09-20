@@ -2267,9 +2267,9 @@ doctrine@^3.0.0:
   dependencies:
     esutils "^2.0.2"
 
-"dplayer@github:libratechw/DPlayer#8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512":
+"dplayer@github:libratechw/DPlayer#975965313279c09401cade52b8d14d7903cab0c4":
   version "1.33.1"
-  resolved "https://codeload.github.com/libratechw/DPlayer/tar.gz/8e49bb76cdd14a69fa5e822d2d1e5800c4aaa512"
+  resolved "https://codeload.github.com/libratechw/DPlayer/tar.gz/975965313279c09401cade52b8d14d7903cab0c4"
   dependencies:
     aribb24.js "~1.11.5"
     axios "^1.7.2"
@@ -3581,9 +3581,9 @@ mitt@^3.0.1:
   resolved "https://registry.yarnpkg.com/mitt/-/mitt-3.0.1.tgz#ea36cf0cc30403601ae074c8f77b7092cdab36d1"
   integrity sha512-vKivATfr97l2/QBCYAkXYDbrIWPM2IIKEl7YPhjCvKlG3kE2gm+uBo6nEXK3M5/Ffh/FLpKExzOQ3JJoJGFKBw==
 
-"mpeg2toh264@github:libratechw/mpeg2toh264#7e402a88419388d2851d82b080c000d1fd8ff085":
+"mpeg2toh264@github:libratechw/mpeg2toh264#38d7e8540b163a392c373e5f0c230eea1cbee8f8":
   version "0.0.1"
-  resolved "https://codeload.github.com/libratechw/mpeg2toh264/tar.gz/7e402a88419388d2851d82b080c000d1fd8ff085"
+  resolved "https://codeload.github.com/libratechw/mpeg2toh264/tar.gz/38d7e8540b163a392c373e5f0c230eea1cbee8f8"
 
 "mpegts.js@github:tsukumijima/mpegts.js#bf4e49d0ff004cf7546237393a62c66e4b926dca":
   version "1.8.0"
