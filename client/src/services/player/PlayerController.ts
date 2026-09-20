@@ -722,13 +722,58 @@ class PlayerController {
                     // かつデコーダーが自動でデインタレースしてくれない環境では、Picture-in-Picture するとインタレ未解除の映像が
                     // ミニプレイヤーで表示されると思われるが、技術的に改善が難しいのと、ミニプレイヤーならジャギ気にならんやろと言うことで当面仕様とする
                     deinterlace: is_yadif_enabled,
-                    deinterlacer: is_yadif_enabled === true ? (video: HTMLVideoElement) => new Deinterlacer(video, {
-                        // 常に MPEG-2 60i 映像を 60fps でぬるぬる再生する
-                        doubleRate: true,
+                    deinterlacer: is_yadif_enabled === true ? (video: HTMLVideoElement) => {
                         // 24fps モードがオンの場合のみ、実写区間では 60fps でぬるぬる描画しつつ、
                         // 映画・アニメなど 24fps で制作された映像を自動検出し、余分なフレームを間引いて本来の動きに近づける
-                        autoFilm: this.playback_mode === 'Live' ? this.quality_profile.tv_24fps_mode : this.quality_profile.video_24fps_mode,
-                    }) : undefined,
+                        const film_24fps_mode = this.playback_mode === 'Live' ? this.quality_profile.tv_24fps_mode : this.quality_profile.video_24fps_mode;
+                        if (film_24fps_mode === true) {
+                            // GPU pulldown 検出 (film) へ明示的に移行する (mpeg2toh264 ①の両立配線で利用可能)。
+                            // film が使えない端末 (EXT_color_buffer_float 不足など) では構築時に例外となるため、
+                            // その場合は従来の autoFilm (CPU 検出) へフォールバックし、再生自体は維持する。
+                            try {
+                                const deinterlacer = new Deinterlacer(video, {
+                                    // 常に MPEG-2 60i 映像を 60fps でぬるぬる再生する
+                                    doubleRate: true,
+                                    film: true,
+                                });
+                                // 実行時の GPU 障害は lib が failure イベントで通知する (film を黙って降ろさない)。
+                                // 24fps の意図は呼出側が所有するため、film 系 engine の障害に限って明示的に
+                                // autoFilm (CPU 検出) へ切り替えて 24fps 再構成を維持する。lib 側の見かけ上の
+                                // フォールバックではない。Worker 停止・context 喪失など film 系以外の障害では
+                                // 切替えない (死んだ GL への autoFilm 設定は例外となるため)。
+                                deinterlacer.addEventListener('failure', (event) => {
+                                    const message = event.detail;
+                                    const filmEngine = /^(film detector unavailable|film detection failed)/.test(message);
+                                    if (!filmEngine || !deinterlacer.film) {
+                                        console.warn(`[PlayerController] Deinterlacer failure (no 24fps recovery): ${message}`);
+                                        return;
+                                    }
+                                    console.warn(`[PlayerController] GPU film engine degraded (${message}); keeping 24fps intent on the CPU autoFilm engine.`);
+                                    try {
+                                        // 障害を起こした GPU 検出の要求を先に解除する。
+                                        // film=true のままでは次のフレームで GPU を再試行し、
+                                        // その失敗で正常な CPU 検出まで停止してしまう。
+                                        deinterlacer.film = false;
+                                        deinterlacer.autoFilm = true;
+                                    } catch (error) {
+                                        // The GL context may be unusable for any engine (G3);
+                                        // the failure is already reported, so only log here.
+                                        console.warn(`[PlayerController] autoFilm recovery failed (${error instanceof Error ? error.message : String(error)}).`);
+                                    }
+                                });
+                                return deinterlacer;
+                            } catch (error) {
+                                // 構築時例外 (EXT_color_buffer_float 不足など) は従来の autoFilm へ。
+                                // 黙らせず理由を残す。
+                                console.warn(`[PlayerController] GPU film unavailable at construction (${error instanceof Error ? error.message : String(error)}); using autoFilm.`);
+                            }
+                        }
+                        return new Deinterlacer(video, {
+                            // 常に MPEG-2 60i 映像を 60fps でぬるぬる再生する
+                            doubleRate: true,
+                            autoFilm: film_24fps_mode,
+                        });
+                    } : undefined,
                 },
                 // mpegts.js
                 mpegts: {
