@@ -1021,6 +1021,14 @@ class PlayerController {
                     mediaSource: 'auto',
                     // MPEG-2 を直接デコードできるブラウザ環境…もあるらしいがデインタレースができるかは不明なため、パススルーモードは使わない
                     passthrough: false,
+                    // 放送波の音声はもともと音量が小さく、通常の画質ではエンコード時に volume=2.0 で音量を2倍にしている
+                    // オリジナル画質でも同じ音量で聞こえるよう、AAC の各チャンネルの global_gain を書き換えて再エンコードなしで音量を上げる
+                    // 1段階あたり 2^(1/4) 倍 (約 1.5dB) なので、4段階でちょうど2倍になる
+                    audioGainSteps: 4,
+                    // 5.1ch はステレオで聞くとセンター・サラウンドが前方の左右に足し込まれ、同じ2倍でも音割れしやすい
+                    // 通常の画質の FFmpeg の AAC エンコーダーは音割れしそうな箇所の音量を自動で抑えるが、global_gain の書き換えにはその処理がない
+                    // 実録画で比べた結果、3段階 (約 1.68 倍) が通常の画質とほぼ同じ音量かつ音割れも同程度に収まったため、5.1ch はこちらを使う
+                    surroundAudioGainSteps: 3,
                     // ライブ放送では選択中のサービスを明示する (tsreadex がすでに選択してくれているが念のため)
                     // 録画再生では、DB に記録済みのサービス ID がある場合だけ指定する
                     serviceId: this.playback_mode === 'Live' ?
@@ -1030,58 +1038,13 @@ class PlayerController {
                     // かつデコーダーが自動でデインタレースしてくれない環境では、Picture-in-Picture するとインタレ未解除の映像が
                     // ミニプレイヤーで表示されると思われるが、技術的に改善が難しいのと、ミニプレイヤーならジャギ気にならんやろと言うことで当面仕様とする
                     deinterlace: is_yadif_enabled,
-                    deinterlacer: is_yadif_enabled === true ? (video: HTMLVideoElement) => {
+                    deinterlacer: is_yadif_enabled === true ? (video: HTMLVideoElement) => new Deinterlacer(video, {
+                        // 常に MPEG-2 60i 映像を 60fps でぬるぬる再生する
+                        doubleRate: true,
                         // 24fps モードがオンの場合のみ、実写区間では 60fps でぬるぬる描画しつつ、
                         // 映画・アニメなど 24fps で制作された映像を自動検出し、余分なフレームを間引いて本来の動きに近づける
-                        const film_24fps_mode = this.playback_mode === 'Live' ? this.quality_profile.tv_24fps_mode : this.quality_profile.video_24fps_mode;
-                        if (film_24fps_mode === true) {
-                            // GPU pulldown 検出 (film) へ明示的に移行する (mpeg2toh264 ①の両立配線で利用可能)。
-                            // film が使えない端末 (EXT_color_buffer_float 不足など) では構築時に例外となるため、
-                            // その場合は従来の autoFilm (CPU 検出) へフォールバックし、再生自体は維持する。
-                            try {
-                                const deinterlacer = new Deinterlacer(video, {
-                                    // 常に MPEG-2 60i 映像を 60fps でぬるぬる再生する
-                                    doubleRate: true,
-                                    film: true,
-                                });
-                                // 実行時の GPU 障害は lib が failure イベントで通知する (film を黙って降ろさない)。
-                                // 24fps の意図は呼出側が所有するため、film 系 engine の障害に限って明示的に
-                                // autoFilm (CPU 検出) へ切り替えて 24fps 再構成を維持する。lib 側の見かけ上の
-                                // フォールバックではない。Worker 停止・context 喪失など film 系以外の障害では
-                                // 切替えない (死んだ GL への autoFilm 設定は例外となるため)。
-                                deinterlacer.addEventListener('failure', (event) => {
-                                    const message = event.detail;
-                                    const filmEngine = /^(film detector unavailable|film detection failed)/.test(message);
-                                    if (!filmEngine || !deinterlacer.film) {
-                                        console.warn(`[PlayerController] Deinterlacer failure (no 24fps recovery): ${message}`);
-                                        return;
-                                    }
-                                    console.warn(`[PlayerController] GPU film engine degraded (${message}); keeping 24fps intent on the CPU autoFilm engine.`);
-                                    try {
-                                        // 障害を起こした GPU 検出の要求を先に解除する。
-                                        // film=true のままでは次のフレームで GPU を再試行し、
-                                        // その失敗で正常な CPU 検出まで停止してしまう。
-                                        deinterlacer.film = false;
-                                        deinterlacer.autoFilm = true;
-                                    } catch (error) {
-                                        // The GL context may be unusable for any engine (G3);
-                                        // the failure is already reported, so only log here.
-                                        console.warn(`[PlayerController] autoFilm recovery failed (${error instanceof Error ? error.message : String(error)}).`);
-                                    }
-                                });
-                                return deinterlacer;
-                            } catch (error) {
-                                // 構築時例外 (EXT_color_buffer_float 不足など) は従来の autoFilm へ。
-                                // 黙らせず理由を残す。
-                                console.warn(`[PlayerController] GPU film unavailable at construction (${error instanceof Error ? error.message : String(error)}); using autoFilm.`);
-                            }
-                        }
-                        return new Deinterlacer(video, {
-                            // 常に MPEG-2 60i 映像を 60fps でぬるぬる再生する
-                            doubleRate: true,
-                            autoFilm: film_24fps_mode,
-                        });
-                    } : undefined,
+                        film: this.playback_mode === 'Live' ? this.quality_profile.tv_24fps_mode : this.quality_profile.video_24fps_mode,
+                    }) : undefined,
                 },
                 // mpegts.js
                 mpegts: {
@@ -2907,6 +2870,11 @@ class PlayerController {
             return;
         }
         this.destroying = true;
+
+        // 非同期の終了処理を待つ間に視聴画面の DOM が外れるため、先に字幕と文字スーパーの描画を止める
+        // aribb24.js がサイズ 0 の Canvas に字幕を再描画すると例外になる
+        this.player?.plugins.aribb24Caption?.hide();
+        this.player?.plugins.aribb24Superimpose?.hide();
 
         // 視聴履歴の最終位置を更新
         // 現在の再生位置を取得するため、プレイヤーの破棄前に実行する必要がある
