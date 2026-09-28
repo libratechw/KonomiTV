@@ -70,7 +70,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ## NVEncC: runtime 版には含まれているが base 版には含まれていない cuda-nvrtc-12-8, libnpp-12-8 をインストールする
 ## VCEEncC: AMF と VA-API の両方のユーザーモードドライバーを入れておき、VCEEncC の --backend auto (既定) に GPU ごとに選ばせる
 ##  - AMF (RDNA 世代以降): AMD 配布の AMF ランタイム (amf-amdgpu-pro, libamdenc-amdgpu-pro) と、AMF が内部で使う Mesa の Vulkan ドライバー (RADV)
-##    AMF ランタイムは、VCEEncC 公式に Ubuntu 24.04 + RADV 環境での初期化失敗の回避策として動作確認されている 6.4.4 (25.10) 系に固定する
+##    AMF ランタイムは dogfood の gfx1151 向け構成に合わせて 25.30 系に固定する
 ##    AMF 利用時の OpenCL は提供元が AMD の実装しか選ばれないため、OpenCL には ROCm を使う (ROCm の動作にはホストの /dev/kfd が必要)
 ##  - VA-API (Vega などの AMF 非対応の GCN 世代も含む): Mesa の VA-API ドライバー (radeonsi) と、Mesa の OpenCL 実装 (Rusticl)
 ##    VA-API 利用時の OpenCL は ROCm を優先し、ROCm で GPU が見つからなければ Rusticl が使われる
@@ -85,10 +85,12 @@ RUN apt-get update && \
     curl -fsSL https://repositories.intel.com/gpu/intel-graphics.key | gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics-keyring.gpg && \
     echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics-keyring.gpg] https://repositories.intel.com/gpu/ubuntu noble unified' > /etc/apt/sources.list.d/intel-gpu-noble.list && \
     # AMD / ROCm リポジトリ
+    # ROCm 6.4.4 の OpenCL は gfx1151 で VCEEncC の command queue 作成に失敗する。
+    # 旧 Ubuntu 22.04 環境で動作確認した AMF 25.30 / ROCm 7.2.3 を維持し、Ubuntu 24.04 用の配布元を使う。
     curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --yes --dearmor --output /usr/share/keyrings/rocm-keyring.gpg && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/6.4.4/ubuntu noble main' > /etc/apt/sources.list.d/amdgpu.list && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/6.4.4/ubuntu noble proprietary' > /etc/apt/sources.list.d/amdgpu-proprietary.list && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/rocm/apt/6.4.4 noble main' > /etc/apt/sources.list.d/rocm.list && \
+    curl -fsSL https://repo.radeon.com/amf/25.30/amf-pub.gpg | gpg --yes --dearmor --output /usr/share/keyrings/amf-keyring.gpg && \
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/amf-keyring.gpg] https://repo.radeon.com/amf/25.30/ubuntu noble main' > /etc/apt/sources.list.d/amf.list && \
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/rocm/apt/7.2.3 noble main' > /etc/apt/sources.list.d/rocm.list && \
     # Google Chrome リポジトリ
     curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --yes --dearmor --output /usr/share/keyrings/google-chrome-keyring.gpg && \
     echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] https://dl.google.com/linux/chrome/deb/ stable main' > /etc/apt/sources.list.d/google-chrome.list && \
@@ -102,8 +104,8 @@ RUN apt-get update && \
         intel-media-va-driver-non-free intel-opencl-icd libigfxcmrt7 libmfx1 libmfxgen1 libva-drm2 libva-x11-2 \
         # NVIDIA GPU 関連のライブラリ
         cuda-nvrtc-12-8 libnpp-12-8 \
-        # AMD GPU 関連のライブラリ (AMF)
-        amf-amdgpu-pro libamdenc-amdgpu-pro libdrm2-amdgpu mesa-vulkan-drivers ocl-icd-libopencl1 rocm-opencl-runtime \
+        # AMD GPU 関連のライブラリ (rocm-opencl-runtime の LLVM ツールチェーンは不要)
+        amf-amdgpu-pro libamdenc-amdgpu-pro libdrm2 mesa-vulkan-drivers ocl-icd-libopencl1 rocm-opencl \
         # AMD GPU 関連のライブラリ (VA-API)
         mesa-va-drivers mesa-opencl-icd \
         # Zendriver 用に Google Chrome と日本語フォントをインストール
