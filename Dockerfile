@@ -77,10 +77,12 @@ RUN apt-get update && \
     curl -fsSL https://repositories.intel.com/gpu/intel-graphics.key | gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics-keyring.gpg && \
     echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics-keyring.gpg] https://repositories.intel.com/gpu/ubuntu jammy unified' > /etc/apt/sources.list.d/intel-gpu-jammy.list && \
     # AMD / ROCm リポジトリ
+    # ROCm 6.4.4 の OpenCL は gfx1151 で VCEEncC の command queue 作成に失敗する。
+    # 動作確認済みの AMF 25.30 / ROCm 7.2.3 を組み合わせる。
     curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --yes --dearmor --output /usr/share/keyrings/rocm-keyring.gpg && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/6.4.4/ubuntu jammy main' > /etc/apt/sources.list.d/amdgpu.list && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/6.4.4/ubuntu jammy proprietary' > /etc/apt/sources.list.d/amdgpu-proprietary.list && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/rocm/apt/6.4.4 jammy main' > /etc/apt/sources.list.d/rocm.list && \
+    curl -fsSL https://repo.radeon.com/amf/25.30/amf-pub.gpg | gpg --yes --dearmor --output /usr/share/keyrings/amf-keyring.gpg && \
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/amf-keyring.gpg] https://repo.radeon.com/amf/25.30/ubuntu jammy main' > /etc/apt/sources.list.d/amf.list && \
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/rocm/apt/7.2.3 jammy main' > /etc/apt/sources.list.d/rocm.list && \
     # Google Chrome リポジトリ
     curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --yes --dearmor --output /usr/share/keyrings/google-chrome-keyring.gpg && \
     echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] https://dl.google.com/linux/chrome/deb/ stable main' > /etc/apt/sources.list.d/google-chrome.list && \
@@ -94,8 +96,8 @@ RUN apt-get update && \
         intel-media-va-driver-non-free intel-opencl-icd libigfxcmrt7 libmfx1 libmfxgen1 libva-drm2 libva-x11-2 \
         # NVIDIA GPU 関連のライブラリ
         cuda-nvrtc-12-8 libnpp-12-8 \
-        # AMD GPU 関連のライブラリ
-        amf-amdgpu-pro libamdenc-amdgpu-pro libdrm2-amdgpu ocl-icd-libopencl1 rocm-opencl-runtime vulkan-amdgpu-pro \
+        # AMD GPU 関連のライブラリ (rocm-opencl-runtime の LLVM ツールチェーンは不要)
+        amf-amdgpu-pro libamdenc-amdgpu-pro libdrm2 mesa-vulkan-drivers ocl-icd-libopencl1 rocm-opencl \
         # Zendriver 用に Google Chrome と日本語フォントをインストール
         google-chrome-stable fonts-vlgothic && \
     # 実行時イメージなので RUN の最後に掃除する
