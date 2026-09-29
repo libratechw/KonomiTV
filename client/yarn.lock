@@ -1752,10 +1752,9 @@ arib-mmt-tlv-ts@^2.0.2:
   resolved "https://registry.yarnpkg.com/arib-mmt-tlv-ts/-/arib-mmt-tlv-ts-2.0.2.tgz#7d4e9c300fa685b1b593911e5103733f1da9167e"
   integrity sha512-IRzUz4uYrGenWqdjkjR8t8GORJpsNVA3noE0+hRU718GGsmOplwvtxiYH2kk9Z42xAoNSN8btp9H19aR3oztmA==
 
-aribb24.js@~1.11.5:
-  version "1.11.5"
-  resolved "https://registry.yarnpkg.com/aribb24.js/-/aribb24.js-1.11.5.tgz#fb4dfc5bc4b10625c0d92987bd4e833d3faa532e"
-  integrity sha512-WEprzYs18FgAIxX885X7YLrgIsjmAecodm6tjmUUckX0kp2Lj9uSdOo+1vxgI7dtEEhhPSB5ocJhDIv560CRFg==
+"aribb24.js@git+https://github.com/libratechw/aribb24.js.git#eb9ddeec1c3cc6e5616419f30bf63ee9d7c2a384":
+  version "2.0.26"
+  resolved "git+https://github.com/libratechw/aribb24.js.git#eb9ddeec1c3cc6e5616419f30bf63ee9d7c2a384"
 
 array-buffer-byte-length@^1.0.1, array-buffer-byte-length@^1.0.2:
   version "1.0.2"
@@ -2274,11 +2273,11 @@ doctrine@^3.0.0:
   dependencies:
     esutils "^2.0.2"
 
-"dplayer@github:tsukumijima/DPlayer#v1.33.2":
+"dplayer@github:libratechw/DPlayer#7552457ede0a0fb6568a328b74b6305a57b6ee2b":
   version "1.33.2"
-  resolved "https://codeload.github.com/tsukumijima/DPlayer/tar.gz/e1132aa9bef23013dfd49ea228622daa6aebc0b0"
+  resolved "https://codeload.github.com/libratechw/DPlayer/tar.gz/7552457ede0a0fb6568a328b74b6305a57b6ee2b"
   dependencies:
-    aribb24.js "~1.11.5"
+    aribb24.js "git+https://github.com/libratechw/aribb24.js.git#eb9ddeec1c3cc6e5616419f30bf63ee9d7c2a384"
     axios "^1.7.2"
     balloon-css "^1.2.0"
 

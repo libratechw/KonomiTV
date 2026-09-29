@@ -347,6 +347,13 @@ class PlayerController {
         (window as any).Hls = Hls;
         Object.assign(window, {mpeg2toh264: {Mpeg2TsPlayer, Deinterlacer}});
 
+        const caption_font = settings_store.settings.caption_font;
+        const caption_font_families = caption_font === 'sans-serif' ? [] :
+            caption_font === 'Yu Gothic' ? ['Yu Gothic Medium', 'Yu Gothic', 'YuGothic', 'Rounded M+ 1m for ARIB'] :
+                [caption_font, 'Rounded M+ 1m for ARIB'];
+        const caption_font_stack = caption_font_families.length > 0 ?
+            `${caption_font_families.map((family) => `"${family}"`).join(', ')}, sans-serif` : 'sans-serif';
+
         // DPlayer を初期化
         this.player = new DPlayer({
             // DPlayer を配置する要素
@@ -839,51 +846,46 @@ class PlayerController {
                 aribb24: {
                     // 文字スーパーレンダラーを無効にするかどうか
                     disableSuperimposeRenderer: is_show_superimpose === false,
-                    // 描画フォント
-                    normalFont: (() => {
-                        let font = settings_store.settings.caption_font;
-                        if (font === 'sans-serif') {
-                            return 'sans-serif';
-                        }
-                        if (font === 'Yu Gothic') {
-                            // 游ゴシックのみ、Windows と Mac で名前が異なる
-                            font = 'Yu Gothic Medium","Yu Gothic","YuGothic';
-                        }
-                        return `"${font}", "Rounded M+ 1m for ARIB", sans-serif`;
+                    // ページで読み込んだ Web フォントは Worker と共有されないため、その設定ではメインスレッドで描画する
+                    renderInWorker: (() => {
+                        if (typeof HTMLCanvasElement.prototype.transferControlToOffscreen !== 'function' ||
+                            typeof OffscreenCanvas === 'undefined' || typeof Worker === 'undefined' ||
+                            typeof document.fonts === 'undefined') return false;
+                        const page_fonts = new Set([...document.fonts].map((face) =>
+                            face.family.replace(/^['"]|['"]$/g, '').toLowerCase()));
+                        return !caption_font_families.some((family) => page_fonts.has(family.toLowerCase()));
                     })(),
-                    // 縁取りする色
-                    forceStrokeColor: settings_store.settings.always_border_caption_text,
-                    // 背景色
-                    forceBackgroundColor: (() => {
-                        if (settings_store.settings.specify_caption_opacity === true) {
-                            const opacity = settings_store.settings.caption_opacity;
-                            return `rgba(0, 0, 0, ${opacity})`;
-                        } else {
-                            return undefined;
-                        }
-                    })(),
-                    // DRCS 文字を対応する Unicode 文字に置換
+                    renderer: {
+                        font: {
+                            // 描画フォント
+                            normal: caption_font_stack,
+                        },
+                        color: {
+                            // 字幕の縁取りに使う色
+                            stroke: settings_store.settings.always_border_caption_text ? '#000000' : null,
+                            // 字幕背景の色と不透明度
+                            background: settings_store.settings.specify_caption_opacity ?
+                                `rgba(0, 0, 0, ${settings_store.settings.caption_opacity})` : undefined,
+                        },
+                    },
+                    // 旧 aribb24.js で有効にしていた既知 DRCS 文字の置換を維持
                     drcsReplacement: true,
-                    // 高解像度の字幕 Canvas を取得できるように
-                    enableRawCanvas: true,
-                    // 縁取りに strokeText API を利用
-                    useStroke: true,
-                    // Unicode 領域の代わりに私用面の領域を利用 (Windows TV 系フォントのみ)
-                    usePUA: (() => {
-                        const font = settings_store.settings.caption_font;
-                        const context = document.createElement('canvas').getContext('2d')!;
-                        context.font = '10px "Rounded M+ 1m for ARIB"';
-                        context.fillText('Test', 0, 0);
-                        context.font = `10px "${font}"`;
-                        context.fillText('Test', 0, 0);
-                        if (font.startsWith('Windows TV')) {
-                            return true;
-                        } else {
-                            return false;
-                        }
-                    })(),
+                    feeder: {
+                        tokenizer: {
+                            // Unicode 領域の代わりに私用面の領域を利用 (Windows TV 系フォントのみ)
+                            pua: (() => {
+                                const font = settings_store.settings.caption_font;
+                                const context = document.createElement('canvas').getContext('2d')!;
+                                context.font = '10px "Rounded M+ 1m for ARIB"';
+                                context.fillText('Test', 0, 0);
+                                context.font = `10px "${font}"`;
+                                context.fillText('Test', 0, 0);
+                                return font.startsWith('Windows TV');
+                            })(),
+                        },
+                    },
                     // 文字スーパーの PRA (内蔵音再生コマンド) のコールバックを指定
-                    PRACallback: async (index: number) => {
+                    onBuiltinSound: async (index: number) => {
                         // 設定で文字スーパーが無効なら実行しない
                         if (is_show_superimpose === false) return;
                         // index に応じた内蔵音を鳴らす
