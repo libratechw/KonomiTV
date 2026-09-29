@@ -25,7 +25,7 @@
         "comlink": "^4.4.1",
         "copy-image-clipboard": "^2.1.2",
         "dayjs": "^1.11.13",
-        "dplayer": "github:libratechw/DPlayer#7552457ede0a0fb6568a328b74b6305a57b6ee2b",
+        "dplayer": "github:libratechw/DPlayer#a71d6776f330fad5034347ff32e2b43e38923c7d",
         "floating-vue": "^5.2.2",
         "hls.js": "^1.6.9",
         "idb": "^8.0.3",
