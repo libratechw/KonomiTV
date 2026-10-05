@@ -10,7 +10,8 @@
         "build": "vue-tsc --noEmit && vite build",
         "preview": "concurrently --raw \"npm:akebi\" \"vite preview\"",
         "lint": "eslint . --fix --ignore-path .gitignore",
-        "typecheck": "vue-tsc --noEmit"
+        "typecheck": "vue-tsc --noEmit",
+        "test:capture": "node --test test/CaptureManager.test.mjs"
     },
     "engines": {
         "node": "^20.16.0"
@@ -25,7 +26,7 @@
         "comlink": "^4.4.1",
         "copy-image-clipboard": "^2.1.2",
         "dayjs": "^1.11.13",
-        "dplayer": "github:tsukumijima/DPlayer#v1.33.2",
+        "dplayer": "git+https://github.com/libratechw/DPlayer.git#b9ad7fc1035510f91c9befc747664a984e957325",
         "floating-vue": "^5.2.2",
         "hls.js": "^1.6.9",
         "idb": "^8.0.3",

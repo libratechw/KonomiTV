@@ -14,7 +14,7 @@ import useChannelsStore from '@/stores/ChannelsStore';
 import usePlayerStore from '@/stores/PlayerStore';
 import useSettingsStore from '@/stores/SettingsStore';
 import Utils, { dayjs, dayjsOriginal } from '@/utils';
-import { ICaptureCommentData, ICaptureExifData } from '@/workers/CaptureCompositor';
+import { ICaptureCommentData, ICaptureCompositorResult, ICaptureExifData } from '@/workers/CaptureCompositor';
 import CaptureCompositorProxy from '@/workers/CaptureCompositorProxy';
 
 
@@ -180,9 +180,10 @@ class CaptureManager implements PlayerManager {
      * ライブ視聴時とビデオ視聴時で設定するメタデータが異なる
      * 現在時刻をキャプチャの撮影時刻として EXIF メタデータに設定するので、このメソッドはキャプチャを撮影する直前にのみ呼び出すこと
      * is_caption_composited / is_comment_composited のみ、実際の状態に合わせて CaptureCompositor 側で上書きされる
+     * @param caption_text 撮影した字幕スナップショットのテキスト。表示がなければ null
      * @returns キャプチャした画像の EXIF に書き込むメタデータ情報
      */
-    private createCaptureExifData(): ICaptureExifData {
+    private createCaptureExifData(caption_text: string | null): ICaptureExifData {
         const channels_store = useChannelsStore();
         const player_store = usePlayerStore();
 
@@ -190,15 +191,8 @@ class CaptureManager implements PlayerManager {
         // 現在時刻をキャプチャの撮影時刻として EXIF に書き込む
         const captured_at = dayjs().format();
 
-        // 字幕がプレイヤー上で表示されているかどうか
-        // 字幕自体は存在するが表示されていない場合は false になる
-        const aribb24_caption = this.player.plugins.aribb24Caption!;
-        const is_caption_showing = ((aribb24_caption as any).isShowing === true && aribb24_caption.isPresent());
-
-        // 字幕がプレイヤー上で表示されている場合、表示中の字幕のテキストを取得
-        // 取得した字幕のテキストは、キャプチャに字幕が合成されているかに関わらず、常に EXIF メタデータに書き込まれる
-        // 字幕が表示されていない場合は null を入れ、キャプチャしたシーンで字幕が表示されていなかったことを明示する
-        const caption_text = is_caption_showing ? aribb24_caption.getTextContent() : null;
+        // 字幕テキストは合成の有無にかかわらず EXIF に書き込む
+        // 表示されていなければ null とし、撮影した字幕スナップショットと同じ時点の状態を示す
 
         // ライブ視聴: 現在視聴中のチャンネル情報・番組情報を EXIF メタデータに設定
         let capture_exif_data: ICaptureExifData;
@@ -344,136 +338,159 @@ class CaptureManager implements PlayerManager {
 
         // キャプチャ中はキャプチャボタンをハイライトする
         this.addHighlight(is_comment_composite);
+        const owned_bitmaps = new Set<ImageBitmap>();
+        let result: ICaptureCompositorResult;
+        try {
 
-        // aribb24js.CanvasID3Renderer のインスタンスを取得
-        // PlayerController での実装上、aribb24.js (字幕) は必ず有効になっている
-        const aribb24_caption = this.player.plugins.aribb24Caption!;
-        // aribb24.js (文字スーパー) はビデオ視聴では常に無効なほか、ライブ視聴でも設定によっては無効になる
-        const aribb24_superimpose = this.player.plugins.aribb24Superimpose ?? null;
+            // 字幕トラックが生成されていない場合は、映像だけを取得する
+            const aribb24_caption = this.player.plugins.aribb24Caption ?? null;
+            // aribb24.js (文字スーパー) はビデオ視聴では常に無効なほか、ライブ視聴でも設定によっては無効になる
+            const aribb24_superimpose = this.player.plugins.aribb24Superimpose ?? null;
 
-        // 字幕・文字スーパーの Canvas を取得
-        // getRawCanvas() で映像と同じ解像度の Canvas が取得できる
-        const caption_canvas = aribb24_caption.getRawCanvas()!;
-        const superimpose_canvas = aribb24_superimpose?.getRawCanvas() ?? null;
+            // ***** キャプチャの実行・字幕/文字スーパー/コメントを合成 *****
 
-        // 字幕/文字スーパーが表示されているか
-        const is_caption_showing = ((aribb24_caption as any).isShowing === true && aribb24_caption.isPresent());
-        const is_superimpose_showing = (aribb24_superimpose && (aribb24_superimpose as any).isShowing === true && aribb24_superimpose.isPresent());
+            // YADIF Deinterlacer の動作中は、破棄可能な WebGL 描画バッファを専用 API で描き直してから取得する
+            const deinterlacer = this.player.plugins.mpeg2toh264?.deinterlacer;
+            const capture_image_bitmap_promise = deinterlacer instanceof Deinterlacer && deinterlacer.running === true ?
+                deinterlacer.capture() : createImageBitmap(this.player.video);
 
-        // ***** キャプチャの実行・字幕/文字スーパー/コメントを合成 *****
+            // 高速化のため映像と字幕を並列取得し、次の字幕へ切り替わる前に同じ tick で開始する
+            // 字幕画像は Compositor が映像の実際の画素寸法へ合わせて描画する
+            const caption_width = this.player.video.videoWidth;
+            const caption_height = this.player.video.videoHeight;
+            const [video_result, caption_result, superimpose_result] = await Promise.allSettled([
+                capture_image_bitmap_promise,
+                aribb24_caption?.snapshot(caption_width, caption_height) ?? Promise.resolve(null),
+                aribb24_superimpose?.snapshot(caption_width, caption_height) ?? Promise.resolve(null),
+            ]);
+            // 片方が失敗しても、取得済みの ImageBitmap を必ず解放できるようにする
+            if (video_result.status === 'fulfilled') owned_bitmaps.add(video_result.value);
+            if (caption_result.status === 'fulfilled' && caption_result.value?.image) {
+                owned_bitmaps.add(caption_result.value.image);
+            }
+            if (superimpose_result.status === 'fulfilled' && superimpose_result.value?.image) {
+                owned_bitmaps.add(superimpose_result.value.image);
+            }
+            if (video_result.status === 'rejected') throw video_result.reason;
+            // 字幕の取得に失敗しても映像は保存する。失敗した種類と原因を残し、取得できた他方は合成する。
+            if (caption_result.status === 'rejected') {
+                console.error('[CaptureManager] Failed to snapshot captions:', caption_result.reason);
+            }
+            if (superimpose_result.status === 'rejected') {
+                console.error('[CaptureManager] Failed to snapshot superimpose:', superimpose_result.reason);
+            }
+            if (caption_result.status === 'rejected' || superimpose_result.status === 'rejected') {
+                this.player.notice('取得に失敗した字幕・文字スーパーを除いてキャプチャを保存します。', undefined, undefined, '#FF6F6A');
+            }
+            const captured_video = video_result.value;
+            const caption_snapshot = caption_result.status === 'fulfilled' ? caption_result.value : null;
+            const superimpose_snapshot = superimpose_result.status === 'fulfilled' ? superimpose_result.value : null;
 
-        // YADIF Deinterlacer の動作中は、破棄可能な WebGL 描画バッファを専用 API で描き直してから取得する
-        const deinterlacer = this.player.plugins.mpeg2toh264?.deinterlacer;
-        const capture_image_bitmap_promise = deinterlacer instanceof Deinterlacer && deinterlacer.running === true ?
-            deinterlacer.capture() : createImageBitmap(this.player.video);
+            // 動画のキャプチャ
+            let capture_image_bitmap = captured_video;
+            // L字画面のクロップが有効な場合のみ、キャプチャにクロップ処理を適用
+            if (settings_store.settings.lshaped_screen_crop_enabled) {
+                capture_image_bitmap = await this.cropImageForLShapedScreen(capture_image_bitmap);
+                owned_bitmaps.add(capture_image_bitmap);
+            }
+            const caption_image_bitmap = caption_snapshot?.image ?? null;
+            const superimpose_image_bitmap = superimpose_snapshot?.image ?? null;
 
-        // 高速化のため、Promise.all() で並列に実行する
-        const create_image_bitmap_results = await Promise.all([
-            // 現在再生中の動画のキャプチャを ImageBitmap として取得
-            capture_image_bitmap_promise,
-            // 字幕が表示されていれば、字幕の Canvas を ImageBitmap として取得
-            is_caption_showing ? createImageBitmap(caption_canvas) : null,
-            // 文字スーパーが表示されていれば、文字スーパーの Canvas を ImageBitmap として取得
-            is_superimpose_showing ? createImageBitmap(superimpose_canvas!) : null,
-        ]);
+            // キャプチャにコメントを合成する場合、コメントを取得する
+            const capture_comment_data = is_comment_composite ? this.createCaptureCommentData() : null;
 
-        // 動画のキャプチャ
-        let capture_image_bitmap = create_image_bitmap_results[0];
-        // L字画面のクロップが有効な場合のみ、キャプチャにクロップ処理を適用
-        if (settings_store.settings.lshaped_screen_crop_enabled) {
-            capture_image_bitmap = await this.cropImageForLShapedScreen(capture_image_bitmap);
-        }
-        // 字幕の Canvas
-        const caption_image_bitmap = create_image_bitmap_results[1];
-        // 文字スーパーの Canvas
-        const superimpose_image_bitmap = create_image_bitmap_results[2];
+            // キャプチャに書き込む EXIF メタデータを取得
+            // is_caption_composited / is_comment_composited のみ、実際の状態に合わせて CaptureCompositor 側で上書きされる
+            const capture_exif_data = this.createCaptureExifData(caption_snapshot?.text ?? null);
 
-        // キャプチャにコメントを合成する場合、コメントを取得する
-        const capture_comment_data = is_comment_composite ? this.createCaptureCommentData() : null;
+            // この後 Web Worker に渡すための ImageBitmap の配列を作成
+            const image_bitmaps = [capture_image_bitmap, caption_image_bitmap, superimpose_image_bitmap]
+                .filter((bitmap) => bitmap !== null) as ImageBitmap[];
 
-        // キャプチャに書き込む EXIF メタデータを取得
-        // is_caption_composited / is_comment_composited のみ、実際の状態に合わせて CaptureCompositor 側で上書きされる
-        const capture_exif_data = this.createCaptureExifData();
+            // キャプチャの合成を実行し、字幕なしキャプチャと字幕ありキャプチャを生成する
+            // Web Worker 側に ImageBitmap を移譲するため、Comlink.transfer() を使う
+            // 第二引数に (第一引数内のオブジェクトに含まれる) 移譲する Transferable オブジェクトを渡す
+            console.log('\u001b[36m[CaptureManager] Composite start:');
+            const capture_compositor_start_time = Utils.time();
+            const capture_compositor = await new CaptureCompositorProxy(Comlink.transfer({
+                mode: settings_store.settings.capture_caption_mode,
+                capture: capture_image_bitmap,
+                caption: caption_image_bitmap,
+                superimpose: superimpose_image_bitmap,
+                capture_comment_data: capture_comment_data,
+                capture_exif_data: capture_exif_data,
+            }, image_bitmaps));
+            result = await capture_compositor.composite();
+            console.log('\u001b[36m[CaptureManager] Composite end:', Utils.mathFloor(Utils.time() - capture_compositor_start_time, 3), 'sec');
 
-        // この後 Web Worker に渡すための ImageBitmap の配列を作成
-        const image_bitmaps = [capture_image_bitmap, caption_image_bitmap, superimpose_image_bitmap]
-            .filter((bitmap) => bitmap !== null) as ImageBitmap[];
+            // 設定で指定されたファイル名パターンに基づいてキャプチャの保存ファイル名 (拡張子なし) を生成する
+            const filename_base = CaptureManager.generateCaptureFilename();
+            const filename_normal = `${filename_base}.jpg`;  // 字幕なしキャプチャ
+            const filename_caption = `${filename_base}_caption.jpg`;  // 字幕ありキャプチャ
 
-        // キャプチャの合成を実行し、字幕なしキャプチャと字幕ありキャプチャを生成する
-        // Web Worker 側に ImageBitmap を移譲するため、Comlink.transfer() を使う
-        // 第二引数に (第一引数内のオブジェクトに含まれる) 移譲する Transferable オブジェクトを渡す
-        console.log('\u001b[36m[CaptureManager] Composite start:');
-        const capture_compositor_start_time = Utils.time();
-        const capture_compositor = await new CaptureCompositorProxy(Comlink.transfer({
-            mode: settings_store.settings.capture_caption_mode,
-            capture: capture_image_bitmap,
-            caption: caption_image_bitmap,
-            superimpose: superimpose_image_bitmap,
-            capture_comment_data: capture_comment_data,
-            capture_exif_data: capture_exif_data,
-        }, image_bitmaps));
-        const result = await capture_compositor.composite();
-        console.log('\u001b[36m[CaptureManager] Composite end:', Utils.mathFloor(Utils.time() - capture_compositor_start_time, 3), 'sec');
+            // ***** キャプチャの保存 *****
 
-        // 設定で指定されたファイル名パターンに基づいてキャプチャの保存ファイル名 (拡張子なし) を生成する
-        const filename_base = CaptureManager.generateCaptureFilename();
-        const filename_normal = `${filename_base}.jpg`;  // 字幕なしキャプチャ
-        const filename_caption = `${filename_base}_caption.jpg`;  // 字幕ありキャプチャ
+            // 字幕なしキャプチャ
+            // 必ず字幕なしキャプチャから保存する
+            if (result.capture_normal !== null) {
 
-        // ***** キャプチャの保存 *****
+                // 生成した Blob をイベントリスナーに送信する
+                player_store.event_emitter.emit('CaptureCompleted', {
+                    capture: result.capture_normal,
+                    filename: filename_normal,
+                });
 
-        // 字幕なしキャプチャ
-        // 必ず字幕なしキャプチャから保存する
-        if (result.capture_normal !== null) {
+                // キャプチャの保存先: ブラウザでダウンロード or 両方
+                if (['Browser', 'Both'].includes(settings_store.settings.capture_save_mode)) {
+                    Utils.downloadBlobData(result.capture_normal, filename_normal);
+                }
 
-            // 生成した Blob をイベントリスナーに送信する
-            player_store.event_emitter.emit('CaptureCompleted', {
-                capture: result.capture_normal,
-                filename: filename_normal,
-            });
-
-            // キャプチャの保存先: ブラウザでダウンロード or 両方
-            if (['Browser', 'Both'].includes(settings_store.settings.capture_save_mode)) {
-                Utils.downloadBlobData(result.capture_normal, filename_normal);
+                // キャプチャの保存先: KonomiTV サーバーにアップロード or 両方
+                // 時間がかかるし完了を待つ必要がないので非同期
+                if (['UploadServer', 'Both'].includes(settings_store.settings.capture_save_mode)) {
+                    Captures.uploadCapture(result.capture_normal, filename_normal);
+                }
             }
 
-            // キャプチャの保存先: KonomiTV サーバーにアップロード or 両方
-            // 時間がかかるし完了を待つ必要がないので非同期
-            if (['UploadServer', 'Both'].includes(settings_store.settings.capture_save_mode)) {
-                Captures.uploadCapture(result.capture_normal, filename_normal);
+            // 字幕ありキャプチャ
+            if (result.capture_caption !== null) {
+
+                // 生成した Blob をイベントリスナーに送信する
+                player_store.event_emitter.emit('CaptureCompleted', {
+                    capture: result.capture_caption,
+                    filename: filename_normal,
+                });
+
+                // キャプチャの保存先: ブラウザでダウンロード or 両方
+                if (['Browser', 'Both'].includes(settings_store.settings.capture_save_mode)) {
+                    Utils.downloadBlobData(result.capture_caption, filename_caption);
+                }
+
+                // キャプチャの保存先: KonomiTV サーバーにアップロード or 両方
+                // アップロードに時間が掛かる上、完了を待つ必要もないので非同期
+                if (['UploadServer', 'Both'].includes(settings_store.settings.capture_save_mode)) {
+                    Captures.uploadCapture(result.capture_caption, filename_caption);
+                }
             }
-        }
 
-        // 字幕ありキャプチャ
-        if (result.capture_caption !== null) {
-
-            // 生成した Blob をイベントリスナーに送信する
-            player_store.event_emitter.emit('CaptureCompleted', {
-                capture: result.capture_caption,
-                filename: filename_normal,
-            });
-
-            // キャプチャの保存先: ブラウザでダウンロード or 両方
-            if (['Browser', 'Both'].includes(settings_store.settings.capture_save_mode)) {
-                Utils.downloadBlobData(result.capture_caption, filename_caption);
+        } catch (error) {
+            console.error('[CaptureManager] Failed to capture:', error);
+            this.player.notice('キャプチャに失敗しました。', undefined, undefined, '#FF6F6A');
+            return;
+        } finally {
+            for (const bitmap of owned_bitmaps) {
+                bitmap.close();
             }
-
-            // キャプチャの保存先: KonomiTV サーバーにアップロード or 両方
-            // アップロードに時間が掛かる上、完了を待つ必要もないので非同期
-            if (['UploadServer', 'Both'].includes(settings_store.settings.capture_save_mode)) {
-                Captures.uploadCapture(result.capture_caption, filename_caption);
+            // キャプチャが終わったので、キャプチャボタンのハイライトを削除する
+            // ただし、キャプチャに掛かった時間が 0.1 秒未満の場合は、0.1 秒経過後にハイライトを削除する (すぐに削除すると一瞬すぎて見えないため)
+            const total_time = Utils.mathFloor(Utils.time() - start_time, 3);
+            if (total_time < 0.1) {
+                setTimeout(() => this.removeHighlight(is_comment_composite), 100);
+            } else {
+                this.removeHighlight(is_comment_composite);
             }
+            console.log('\u001b[36m[CaptureManager] Total:', total_time, 'sec');
         }
-
-        // キャプチャが終わったので、キャプチャボタンのハイライトを削除する
-        // ただし、キャプチャに掛かった時間が 0.1 秒未満の場合は、0.1 秒経過後にハイライトを削除する (すぐに削除すると一瞬すぎて見えないため)
-        const total_time = Utils.mathFloor(Utils.time() - start_time, 3);
-        if (total_time < 0.1) {
-            setTimeout(() => this.removeHighlight(is_comment_composite), 100);
-        } else {
-            this.removeHighlight(is_comment_composite);
-        }
-        console.log('\u001b[36m[CaptureManager] Total:', total_time, 'sec');
 
         // ***** クリップボードへのキャプチャ画像のコピー *****
 

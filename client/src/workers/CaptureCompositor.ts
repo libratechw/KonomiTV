@@ -172,14 +172,21 @@ class CaptureCompositor implements ICaptureCompositor {
             }
         }
 
-        // 並列で実行して、結果を待つ
-        const [capture_caption, capture_normal] = await Promise.all([capture_caption_promise, capture_normal_promise]);
-        console.log('[CaptureCompositor] Composite end:', Utils.mathFloor(Utils.time() - start_time, 3), 'sec');
-
-        return {
-            capture_normal: capture_normal,
-            capture_caption: capture_caption,
-        };
+        try {
+            // 片方が失敗しても、もう片方が ImageBitmap を使い終えるまで待ってから解放する
+            const [caption_result, normal_result] = await Promise.allSettled([capture_caption_promise, capture_normal_promise]);
+            if (caption_result.status === 'rejected') throw caption_result.reason;
+            if (normal_result.status === 'rejected') throw normal_result.reason;
+            console.log('[CaptureCompositor] Composite end:', Utils.mathFloor(Utils.time() - start_time, 3), 'sec');
+            return {
+                capture_normal: normal_result.value,
+                capture_caption: caption_result.value,
+            };
+        } finally {
+            this.options.capture.close();
+            this.options.caption?.close();
+            this.options.superimpose?.close();
+        }
     }
 
 
