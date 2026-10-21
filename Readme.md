@@ -1,3 +1,20 @@
+# KonomiTV dogfood/integration
+
+このブランチは、複数の修正候補を日常利用に近い条件で検証する統合版です。ブランチ全体を上流へ取り込む対象にはしていません。
+
+- 基準となる上流: [`tsukumijima/KonomiTV@1a10aa0`](https://github.com/tsukumijima/KonomiTV/commit/1a10aa0)
+- DPlayer: [`libratechw/DPlayer@e0c3389`](https://github.com/libratechw/DPlayer/commit/e0c3389b3fdc126ba4c04ac60247ca2816bd09e0)。既存の検証用修正を維持しています。
+- mpeg2toh264: [`tsukumijima/mpeg2toh264@69f2a47`](https://github.com/tsukumijima/mpeg2toh264/commit/69f2a47aa5bbeb8ffce57ecf5408eaa85a59d7d1)。上流の音量補正設定と対応する版へ更新しています。
+
+Live の明示的な一時停止状態の保持、古い再生処理の干渉防止、Safari の録画再生用 MediaSource 配置、タッチ端末の中央操作ボタン、副音声がない区間での主音声再生など、既存の統合差分をコード上で維持しています。
+
+Docker の Ubuntu 24.04 化と VA-API 対応は上流へ追従し、gfx1151 向けの AMF 25.30 / ROCm 7.2.3 固定は Ubuntu 24.04 用の配布元へ変更しています。旧 Ubuntu 22.04 環境の動作実績は、新しい組合せの動作保証にはなりません。
+
+ローカルでクライアントの lint・型検査・ビルド、Live の再生世代と一時停止状態の回帰テスト、サーバーの Ruff・Pyright を確認しました。Pyright はエラー0件、非推奨APIの警告6件でした。
+
+この rebase はコードの更新です。更新後の Docker イメージの起動と実機での再生は未確認で、配備中の環境を更新したことは示しません。
+
+---
 
 # <img width="350" src="https://user-images.githubusercontent.com/39271166/134050201-8110f076-a939-4b62-8c86-7beaa3d4728c.png" alt="KonomiTV Logo">　<!-- omit in toc -->
 
